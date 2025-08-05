@@ -1,0 +1,671 @@
+{% extends 'main/MainLayout.html' %}
+{% load crispy_forms_tags %}
+
+{% block content %}
+<div class="container-fluid mt-4">
+  <div class="row">
+    <div class="col-12">
+      
+      <!-- Messages Display -->
+      {% if messages %}
+      <div class="row mb-3">
+        <div class="col-12">
+          {% for message in messages %}
+          <div class="alert alert-{{ message.tags }} alert-dismissible fade show" role="alert">
+            <i class="bi bi-{% if message.tags == 'success' %}check-circle{% elif message.tags == 'error' %}exclamation-triangle{% elif message.tags == 'warning' %}exclamation-triangle{% else %}info-circle{% endif %}"></i>
+            {{ message }}
+            <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+          </div>
+          {% endfor %}
+        </div>
+      </div>
+      {% endif %}
+      
+      <!-- Header -->
+      <div class="d-flex justify-content-between align-items-center mb-4">
+        <h1 class="mb-0">
+          <i class="bi bi-gear-fill"></i> 
+          {% if request.user.is_superuser %}
+            Device Configuration - {{ user.company_name }}
+          {% else %}
+            My Device Configuration
+          {% endif %}
+        </h1>
+        <div class="btn-group">
+          <a href="{% url 'device_status' user.id %}" class="btn btn-outline-primary">
+            <i class="bi bi-arrow-left"></i> Back to Status
+          </a>
+          
+          {% if request.user.is_superuser or request.user == user %}
+          <button type="button" class="btn btn-success" onclick="testConnection()">
+            <i class="bi bi-wifi"></i> Test Connection
+          </button>
+          <button type="button" class="btn btn-primary" onclick="syncWithZimra()">
+            <i class="bi bi-arrow-repeat"></i> 
+            {% if request.user.is_superuser %}Sync with ZIMRA{% else %}Sync My Device{% endif %}
+          </button>
+          {% endif %}
+        </div>
+      </div>
+
+      <!-- Health Status Overview -->
+      <div class="row mb-4">
+        <div class="col-12">
+          <div class="card {% if health_checks.overall_status == 'Healthy' %}border-success{% else %}border-warning{% endif %}">
+            <div class="card-body">
+              <div class="d-flex align-items-center">
+                <div class="me-3">
+                  {% if health_checks.overall_status == 'Healthy' %}
+                    <i class="bi bi-check-circle-fill text-success fs-1"></i>
+                  {% else %}
+                    <i class="bi bi-exclamation-triangle-fill text-warning fs-1"></i>
+                  {% endif %}
+                </div>
+                <div class="p-5">
+                  <h4 class="">Overall Status: {{ health_checks.overall_status }}</h4>
+                  <p class="mb-0 text-muted">
+                    {% if request.user.is_superuser %}
+                      Device configuration and ZIMRA connectivity status for {{ user.company_name }}
+                    {% else %}
+                      Your device configuration and ZIMRA connectivity status
+                    {% endif %}
+                  </p>
+                </div>
+                <div class="ms-auto">
+                  <div class="progress" style="width: 200px; height: 20px;">
+                    <div class="progress-bar {% if device_info.setup_progress >= 80 %}bg-success{% elif device_info.setup_progress >= 50 %}bg-warning{% else %}bg-danger{% endif %}" 
+                         role="progressbar" 
+                         style="width: {{ device_info.setup_progress }}%">
+                      {{ device_info.setup_progress }}% Complete
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Configuration Tabs -->
+      <div class="row">
+        <div class="col-12">
+          <div class="card">
+            <div class="card-header">
+              <ul class="nav nav-tabs card-header-tabs" id="configTabs" role="tablist">
+                <li class="nav-item" role="presentation">
+                  <button class="nav-link active" id="device-tab" data-bs-toggle="tab" data-bs-target="#device" type="button" role="tab">
+                    <i class="bi bi-router"></i> Device Settings
+                  </button>
+                </li>
+                <li class="nav-item" role="presentation">
+                  <button class="nav-link" id="certificates-tab" data-bs-toggle="tab" data-bs-target="#certificates" type="button" role="tab">
+                    <i class="bi bi-shield-check"></i> Certificates
+                  </button>
+                </li>
+                <li class="nav-item" role="presentation">
+                  <button class="nav-link" id="zimra-tab" data-bs-toggle="tab" data-bs-target="#zimra" type="button" role="tab">
+                    <i class="bi bi-cloud"></i> ZIMRA Integration
+                  </button>
+                </li>
+                <li class="nav-item" role="presentation">
+                  <button class="nav-link" id="monitoring-tab" data-bs-toggle="tab" data-bs-target="#monitoring" type="button" role="tab">
+                    <i class="bi bi-activity"></i> Monitoring
+                  </button>
+                </li>
+              </ul>
+            </div>
+            
+            <div class="card-body">
+              <div class="tab-content" id="configTabsContent">
+                
+                <!-- Device Settings Tab -->
+                <div class="tab-pane fade show active" id="device" role="tabpanel">
+                  <div class="row">
+                    <div class="col-md-8">
+                      <h5><i class="bi bi-gear"></i> Device Configuration</h5>
+                      <form method="post" class="mb-4">
+                        {% csrf_token %}
+                        <input type="hidden" name="action" value="update_device_info">
+                        
+                        <div class="row">
+                          <div class="col-md-6">
+                            <div class="mb-3">
+                              <label for="device_id" class="form-label">Device ID</label>
+                              <input type="number" class="form-control" id="device_id" name="device_id" 
+                                     value="{{ device_info.device_id|default:'' }}" required>
+                              <div class="form-text">Unique ZIMRA device identifier</div>
+                            </div>
+                          </div>
+                          <div class="col-md-6">
+                            <div class="mb-3">
+                              <label for="model_name" class="form-label">Model Name</label>
+                              <input type="text" class="form-control" id="model_name" name="model_name" 
+                                     value="{{ device_info.model_name|default:'' }}" required>
+                              <div class="form-text">Device model name for ZIMRA</div>
+                            </div>
+                          </div>
+                        </div>
+                        
+                        <div class="row">
+                          <div class="col-md-6">
+                            <div class="mb-3">
+                              <label for="model_version" class="form-label">Model Version</label>
+                              <input type="text" class="form-control" id="model_version" name="model_version" 
+                                     value="{{ device_info.model_version|default:'' }}" required>
+                              <div class="form-text">Device firmware/software version</div>
+                            </div>
+                          </div>
+                          <div class="col-md-6">
+                            <div class="mb-3">
+                              <label class="form-label">Registration Status</label>
+                              <div class="form-control-plaintext">
+                                <span class="badge {% if device_info.registration_status == 'Active' %}bg-success{% else %}bg-warning{% endif %}">
+                                  {{ device_info.registration_status }}
+                                </span>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                        
+                        {% if request.user.is_superuser or request.user == user %}
+                        <button type="submit" class="btn btn-primary">
+                          <i class="bi bi-save"></i> 
+                          {% if request.user.is_superuser %}Update Device Information{% else %}Update My Device{% endif %}
+                        </button>
+                        {% endif %}
+                      </form>
+                      
+                      <!-- ZIMRA Configuration Data -->
+                      <div class="mt-4">
+                        <h5><i class="bi bi-cloud-check"></i> ZIMRA Configuration Data</h5>
+                        {% if device_info.has_zimra_data %}
+                        <div class="alert alert-info">
+                          <small><i class="bi bi-info-circle"></i> Last synced: {{ device_info.zimra_last_sync|date:"Y-m-d H:i" }}</small>
+                        </div>
+                        <div class="row">
+                          <div class="col-md-6">
+                            <table class="table table-sm">
+                              <tr>
+                                <td><strong>ZIMRA Serial Number:</strong></td>
+                                <td>{{ device_info.zimra_serial_number }}</td>
+                              </tr>
+                              <tr>
+                                <td><strong>ZIMRA Device Status:</strong></td>
+                                <td>
+                                  <span class="badge {% if device_info.zimra_device_status == 'Active' %}bg-success{% else %}bg-warning{% endif %}">
+                                    {{ device_info.zimra_device_status }}
+                                  </span>
+                                </td>
+                              </tr>
+                              <tr>
+                                <td><strong>ZIMRA Device Type:</strong></td>
+                                <td>{{ device_info.zimra_device_type }}</td>
+                              </tr>
+                            </table>
+                          </div>
+                          <div class="col-md-6">
+                            <table class="table table-sm">
+                              <tr>
+                                <td><strong>ZIMRA Firmware:</strong></td>
+                                <td>{{ device_info.zimra_firmware_version }}</td>
+                              </tr>
+                              <tr>
+                                <td><strong>Tax Period:</strong></td>
+                                <td>{{ device_info.zimra_tax_period }}</td>
+                              </tr>
+                              <tr>
+                                <td><strong>Last Receipt #:</strong></td>
+                                <td>{{ device_info.zimra_last_receipt_number }}</td>
+                              </tr>
+                            </table>
+                          </div>
+                        </div>
+                        {% else %}
+                        <div class="alert alert-warning">
+                          <i class="bi bi-exclamation-triangle"></i> No ZIMRA data available. Click "Sync with ZIMRA" to fetch current configuration.
+                        </div>
+                        {% endif %}
+                      </div>
+                    </div>
+                    
+                    <div class="col-md-4">
+                      <h5><i class="bi bi-list-check"></i> Setup Progress</h5>
+                      <div class="list-group">
+                        <div class="list-group-item d-flex justify-content-between align-items-center">
+                          Device ID Configured
+                          {% if device_info.device_id %}
+                            <i class="bi bi-check-circle-fill text-success"></i>
+                          {% else %}
+                            <i class="bi bi-x-circle-fill text-danger"></i>
+                          {% endif %}
+                        </div>
+                        <div class="list-group-item d-flex justify-content-between align-items-center">
+                          Model Information Set
+                          {% if device_info.model_name != 'Not Set' %}
+                            <i class="bi bi-check-circle-fill text-success"></i>
+                          {% else %}
+                            <i class="bi bi-x-circle-fill text-danger"></i>
+                          {% endif %}
+                        </div>
+                        <div class="list-group-item d-flex justify-content-between align-items-center">
+                          Certificates Installed
+                          {% if certificate_status.status == 'Valid' %}
+                            <i class="bi bi-check-circle-fill text-success"></i>
+                          {% else %}
+                            <i class="bi bi-x-circle-fill text-danger"></i>
+                          {% endif %}
+                        </div>
+                        <div class="list-group-item d-flex justify-content-between align-items-center">
+                          User Account Active
+                          {% if health_checks.user_active %}
+                            <i class="bi bi-check-circle-fill text-success"></i>
+                          {% else %}
+                            <i class="bi bi-x-circle-fill text-danger"></i>
+                          {% endif %}
+                        </div>
+                        <div class="list-group-item d-flex justify-content-between align-items-center">
+                          ZIMRA Connection
+                          {% if health_checks.zimra_connected %}
+                            <i class="bi bi-check-circle-fill text-success"></i>
+                          {% else %}
+                            <i class="bi bi-x-circle-fill text-danger"></i>
+                          {% endif %}
+                        </div>
+                        <div class="list-group-item d-flex justify-content-between align-items-center">
+                          ZIMRA Data Synced
+                          {% if device_info.has_zimra_data %}
+                            <i class="bi bi-check-circle-fill text-success"></i>
+                          {% else %}
+                            <i class="bi bi-x-circle-fill text-danger"></i>
+                          {% endif %}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <!-- Certificates Tab -->
+                <div class="tab-pane fade" id="certificates" role="tabpanel">
+                  <h5><i class="bi bi-shield-check"></i> Certificate Management</h5>
+                  
+                  <div class="row">
+                    <div class="col-md-6">
+                      <div class="card">
+                        <div class="card-header">
+                          <h6 class="mb-0">Certificate Status</h6>
+                        </div>
+                        <div class="card-body">
+                          <table class="table table-sm">
+                            <tr>
+                              <td><strong>Certificate File:</strong></td>
+                              <td>
+                                {% if certificate_status.cert_exists %}
+                                  <span class="badge bg-success">Found</span>
+                                {% else %}
+                                  <span class="badge bg-danger">Missing</span>
+                                {% endif %}
+                              </td>
+                            </tr>
+                            <tr>
+                              <td><strong>Private Key:</strong></td>
+                              <td>
+                                {% if certificate_status.key_exists %}
+                                  <span class="badge bg-success">Found</span>
+                                {% else %}
+                                  <span class="badge bg-danger">Missing</span>
+                                {% endif %}
+                              </td>
+                            </tr>
+                            <tr>
+                              <td><strong>Overall Status:</strong></td>
+                              <td>
+                                <span class="badge {% if certificate_status.status == 'Valid' %}bg-success{% else %}bg-danger{% endif %}">
+                                  {{ certificate_status.status }}
+                                </span>
+                              </td>
+                            </tr>
+                            {% if certificate_status.valid_until %}
+                            <tr>
+                              <td><strong>Valid Until:</strong></td>
+                              <td>{{ certificate_status.valid_until|date:"Y-m-d H:i" }}</td>
+                            </tr>
+                            <tr>
+                              <td><strong>Days Until Expiry:</strong></td>
+                              <td>
+                                {% if certificate_status.days_until_expiry < 30 %}
+                                  <span class="text-danger">{{ certificate_status.days_until_expiry }} days</span>
+                                {% else %}
+                                  <span class="text-success">{{ certificate_status.days_until_expiry }} days</span>
+                                {% endif %}
+                              </td>
+                            </tr>
+                            {% endif %}
+                          </table>
+                        </div>
+                      </div>
+                    </div>
+                    
+                    <div class="col-md-6">
+                      <div class="card">
+                        <div class="card-header">
+                          <h6 class="mb-0">Certificate Details</h6>
+                        </div>
+                        <div class="card-body">
+                          {% if certificate_status.subject %}
+                          <table class="table table-sm">
+                            <tr>
+                              <td><strong>Subject:</strong></td>
+                              <td><small>{{ certificate_status.subject }}</small></td>
+                            </tr>
+                            <tr>
+                              <td><strong>Issuer:</strong></td>
+                              <td><small>{{ certificate_status.issuer }}</small></td>
+                            </tr>
+                            <tr>
+                              <td><strong>Valid From:</strong></td>
+                              <td>{{ certificate_status.valid_from|date:"Y-m-d H:i" }}</td>
+                            </tr>
+                          </table>
+                          {% else %}
+                          <p class="text-muted">Certificate details not available</p>
+                          {% endif %}
+                          
+                          {% if certificate_status.parsing_error %}
+                          <div class="alert alert-warning">
+                            <strong>Certificate Parsing Error:</strong> {{ certificate_status.parsing_error }}
+                          </div>
+                          {% endif %}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                  
+                  <div class="row mt-3">
+                    <div class="col-12">
+                      <div class="card">
+                        <div class="card-header">
+                          <h6 class="mb-0">Certificate Management Actions</h6>
+                        </div>
+                        <div class="card-body">
+                          <div class="btn-group">
+                            <button type="button" class="btn btn-outline-primary" onclick="generateCSR()">
+                              <i class="bi bi-file-earmark-plus"></i> Generate CSR
+                            </button>
+                            <button type="button" class="btn btn-outline-success" onclick="uploadCertificate()">
+                              <i class="bi bi-upload"></i> Upload Certificate
+                            </button>
+                            <button type="button" class="btn btn-outline-warning" onclick="renewCertificate()">
+                              <i class="bi bi-arrow-clockwise"></i> Renew Certificate
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <!-- ZIMRA Integration Tab -->
+                <div class="tab-pane fade" id="zimra" role="tabpanel">
+                  <h5><i class="bi bi-cloud"></i> ZIMRA API Integration</h5>
+                  
+                  <div class="row">
+                    <div class="col-md-6">
+                      <div class="card">
+                        <div class="card-header">
+                          <h6 class="mb-0">API Endpoints</h6>
+                        </div>
+                        <div class="card-body">
+                          <table class="table table-sm">
+                            <tr>
+                              <td><strong>Environment:</strong></td>
+                              <td><span class="badge bg-info">{{ api_endpoints.environment }}</span></td>
+                            </tr>
+                            <tr>
+                              <td><strong>Base URL:</strong></td>
+                              <td><small>{{ api_endpoints.base_url }}</small></td>
+                            </tr>
+                            <tr>
+                              <td><strong>Configuration:</strong></td>
+                              <td><small>{{ api_endpoints.get_config }}</small></td>
+                            </tr>
+                            <tr>
+                              <td><strong>Status Check:</strong></td>
+                              <td><small>{{ api_endpoints.get_status }}</small></td>
+                            </tr>
+                            <tr>
+                              <td><strong>Receipt Submission:</strong></td>
+                              <td><small>{{ api_endpoints.submit_receipt }}</small></td>
+                            </tr>
+                          </table>
+                        </div>
+                      </div>
+                    </div>
+                    
+                    <div class="col-md-6">
+                      <div class="card">
+                        <div class="card-header">
+                          <h6 class="mb-0">Connection Status</h6>
+                        </div>
+                        <div class="card-body">
+                          <table class="table table-sm">
+                            <tr>
+                              <td><strong>Status:</strong></td>
+                              <td>
+                                {% if zimra_config.connection_status == 'Connected' %}
+                                  <span class="badge bg-success">{{ zimra_config.connection_status }}</span>
+                                {% elif zimra_config.connection_status == 'Failed' %}
+                                  <span class="badge bg-danger">{{ zimra_config.connection_status }}</span>
+                                {% else %}
+                                  <span class="badge bg-warning">{{ zimra_config.connection_status }}</span>
+                                {% endif %}
+                              </td>
+                            </tr>
+                            <tr>
+                              <td><strong>Last Test:</strong></td>
+                              <td>{{ zimra_config.last_test|default:"Never"|date:"Y-m-d H:i" }}</td>
+                            </tr>
+                            {% if zimra_config.response_time %}
+                            <tr>
+                              <td><strong>Response Time:</strong></td>
+                              <td>{{ zimra_config.response_time|floatformat:3 }}s</td>
+                            </tr>
+                            {% endif %}
+                            {% if zimra_config.error %}
+                            <tr>
+                              <td><strong>Error:</strong></td>
+                              <td><small class="text-danger">{{ zimra_config.error }}</small></td>
+                            </tr>
+                            {% endif %}
+                          </table>
+                          
+                          {% if zimra_config.zimra_response %}
+                          <div class="mt-3">
+                            <h6>Latest ZIMRA Response:</h6>
+                            <pre class="bg-light p-2 rounded"><small>{{ zimra_config.zimra_response|pprint }}</small></pre>
+                          </div>
+                          {% endif %}
+                          
+                          {% if device_info.has_zimra_data %}
+                          <div class="mt-3">
+                            <h6>Stored ZIMRA Data:</h6>
+                            <div class="table-responsive">
+                              <table class="table table-sm">
+                                <tr>
+                                  <td><strong>Serial Number:</strong></td>
+                                  <td>{{ device_info.zimra_serial_number }}</td>
+                                </tr>
+                                <tr>
+                                  <td><strong>Device Type:</strong></td>
+                                  <td>{{ device_info.zimra_device_type }}</td>
+                                </tr>
+                                <tr>
+                                  <td><strong>Firmware Version:</strong></td>
+                                  <td>{{ device_info.zimra_firmware_version }}</td>
+                                </tr>
+                                <tr>
+                                  <td><strong>Registration Status:</strong></td>
+                                  <td>
+                                    <span class="badge {% if device_info.zimra_registration_status == 'Active' %}bg-success{% else %}bg-warning{% endif %}">
+                                      {{ device_info.zimra_registration_status }}
+                                    </span>
+                                  </td>
+                                </tr>
+                                <tr>
+                                  <td><strong>Last Sync:</strong></td>
+                                  <td>{{ device_info.zimra_last_sync|date:"Y-m-d H:i:s" }}</td>
+                                </tr>
+                              </table>
+                            </div>
+                          </div>
+                          {% endif %}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <!-- Monitoring Tab -->
+                <div class="tab-pane fade" id="monitoring" role="tabpanel">
+                  <h5><i class="bi bi-activity"></i> System Monitoring</h5>
+                  
+                  <div class="row">
+                    <div class="col-md-8">
+                      <div class="card">
+                        <div class="card-header">
+                          <h6 class="mb-0">Recent Activity</h6>
+                        </div>
+                        <div class="card-body">
+                          {% if recent_activity %}
+                          <div class="table-responsive">
+                            <table class="table table-sm">
+                              <thead>
+                                <tr>
+                                  <th>Date</th>
+                                  <th>Receipt</th>
+                                  <th>Status</th>
+                                  <th>ZIMRA Response</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {% for activity in recent_activity %}
+                                <tr>
+                                  <td>{{ activity.submitted_at|date:"m/d H:i" }}</td>
+                                  <td>#{{ activity.receipt.receipt_global_number|default:activity.receipt.id }}</td>
+                                  <td>
+                                    <span class="badge {% if activity.success %}bg-success{% else %}bg-danger{% endif %}">
+                                      {% if activity.success %}Success{% else %}Failed{% endif %}
+                                    </span>
+                                  </td>
+                                  <td><small>{{ activity.zimra_response|default:"No response"|truncatechars:30 }}</small></td>
+                                </tr>
+                                {% endfor %}
+                              </tbody>
+                            </table>
+                          </div>
+                          {% else %}
+                          <p class="text-muted">No recent activity recorded</p>
+                          {% endif %}
+                        </div>
+                      </div>
+                    </div>
+                    
+                    <div class="col-md-4">
+                      <div class="card">
+                        <div class="card-header">
+                          <h6 class="mb-0">System Health</h6>
+                        </div>
+                        <div class="card-body">
+                          <div class="list-group list-group-flush">
+                            <div class="list-group-item d-flex justify-content-between align-items-center px-0">
+                              Device Configured
+                              {% if health_checks.device_configured %}
+                                <i class="bi bi-check-circle-fill text-success"></i>
+                              {% else %}
+                                <i class="bi bi-x-circle-fill text-danger"></i>
+                              {% endif %}
+                            </div>
+                            <div class="list-group-item d-flex justify-content-between align-items-center px-0">
+                              Certificates Valid
+                              {% if health_checks.certificates_valid %}
+                                <i class="bi bi-check-circle-fill text-success"></i>
+                              {% else %}
+                                <i class="bi bi-x-circle-fill text-danger"></i>
+                              {% endif %}
+                            </div>
+                            <div class="list-group-item d-flex justify-content-between align-items-center px-0">
+                              ZIMRA Connected
+                              {% if health_checks.zimra_connected %}
+                                <i class="bi bi-check-circle-fill text-success"></i>
+                              {% else %}
+                                <i class="bi bi-x-circle-fill text-danger"></i>
+                              {% endif %}
+                            </div>
+                            <div class="list-group-item d-flex justify-content-between align-items-center px-0">
+                              User Active
+                              {% if health_checks.user_active %}
+                                <i class="bi bi-check-circle-fill text-success"></i>
+                              {% else %}
+                                <i class="bi bi-x-circle-fill text-danger"></i>
+                              {% endif %}
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Test Connection Form (Hidden) -->
+<form id="testConnectionForm" method="post" style="display: none;">
+  {% csrf_token %}
+  <input type="hidden" name="action" value="test_connection">
+</form>
+
+<!-- Sync with ZIMRA Form (Hidden) -->
+<form id="syncZimraForm" method="post" style="display: none;">
+  {% csrf_token %}
+  <input type="hidden" name="action" value="sync_with_zimra">
+</form>
+
+<script>
+function testConnection() {
+  if (confirm('Test connection to ZIMRA API?')) {
+    console.log('Submitting test connection form');
+    document.getElementById('testConnectionForm').submit();
+  }
+}
+
+function syncWithZimra() {
+  if (confirm('Synchronize device configuration with ZIMRA? This may take a few moments.')) {
+    console.log('Submitting sync form');
+    document.getElementById('syncZimraForm').submit();
+  }
+}
+
+function generateCSR() {
+  alert('CSR generation feature will be implemented');
+}
+
+function uploadCertificate() {
+  alert('Certificate upload feature will be implemented');
+}
+
+function renewCertificate() {
+  alert('Certificate renewal feature will be implemented');
+}
+
+// Auto-refresh connection status every 30 seconds
+setInterval(function() {
+  // Optional: Add AJAX call to refresh connection status
+}, 30000);
+</script>
+
+{% endblock content %}

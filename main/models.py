@@ -58,6 +58,17 @@ class User(AbstractBaseUser, PermissionsMixin):
     model_version = models.CharField(max_length=255, blank=True, default='')
     activation_key = models.CharField(max_length=30, blank=True, null=True)
     
+    # ZIMRA-specific fields
+    zimra_device_status = models.CharField(max_length=50, blank=True, default='')
+    zimra_last_sync = models.DateTimeField(null=True, blank=True)
+    zimra_serial_number = models.CharField(max_length=100, blank=True, default='')
+    zimra_firmware_version = models.CharField(max_length=50, blank=True, default='')
+    zimra_tax_period = models.CharField(max_length=50, blank=True, default='')
+    zimra_device_type = models.CharField(max_length=50, blank=True, default='')
+    zimra_registration_status = models.CharField(max_length=50, blank=True, default='')
+    zimra_last_receipt_number = models.CharField(max_length=50, blank=True, default='')
+    zimra_response_data = models.JSONField(default=dict, blank=True)
+    
     is_subscribed = models.BooleanField(default=False)
     is_active = models.BooleanField(default=False)
     is_staff = models.BooleanField(default=False)
@@ -160,6 +171,7 @@ MONEY_TYPE = (
 )
 
 class Receipt(models.Model):
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='receipts', null=True, blank=True)
     buyer = models.ForeignKey(Buyer, on_delete=models.CASCADE, related_name='receipts', blank=True, null=True)
     receipt_type = models.CharField(max_length=20, null=True, choices=RECEIPT_TYPE)
     currency = models.CharField(max_length=20, null=True, choices=RECEIPT_CURRENCY)

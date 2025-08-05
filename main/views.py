@@ -5,6 +5,7 @@ from django.shortcuts import get_object_or_404, render, redirect
 from django.contrib.auth import authenticate, login, logout, update_session_auth_hash
 from django.contrib.auth.decorators import login_required
 from django.contrib.auth.forms import PasswordChangeForm
+from django.contrib import messages
 from django.conf import settings
 from django.db.models import Count, Q
 import os
@@ -12,12 +13,17 @@ import json
 import requests
 from django.utils import timezone
 from rest_framework_simplejwt.tokens import RefreshToken
+import urllib3
 from .models import User, FiscalDay, Receipt, ReceiptLine, ReceiptTax, Buyer, CreditDebitNote, Csr, ReceiptSubmissionLog
 from .serializers import (
     UserSerializer, FiscalDaySerializer, ReceiptSerializer, 
     ReceiptLineSerializer, ReceiptTaxSerializer, BuyerSerializer,
     CreditDebitNoteSerializer, CsrSerializer, ReceiptSubmissionLogSerializer
 )
+
+# Disable SSL warnings for test environment
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+
 import re
 import textwrap
 from oauth2client.client import OAuth2Credentials
@@ -392,7 +398,7 @@ class CsrViewSet(viewsets.ModelViewSet):
         url = f"https://fdmsapitest.zimra.co.zw/Device/v1/{user.device_id}/GetConfiguration"
         
         cert_path = os.path.join(settings.BASE_DIR, 'certificates', f'device_cert_{user.id}.pem')
-        key_path = os.path.join(settings.BASE_DIR, 'certificates', 'private_key.pem')
+        key_path = os.path.join(settings.BASE_DIR, 'certificates', 'private.key')
 
         if not os.path.exists(cert_path) or not os.path.exists(key_path):
             return Response({"detail": "Certificate or key not found"}, status=status.HTTP_400_BAD_REQUEST)
@@ -404,7 +410,7 @@ class CsrViewSet(viewsets.ModelViewSet):
         }
 
         try:
-            response = requests.get(url, cert=(cert_path, key_path), headers=headers, verify=True)
+            response = requests.get(url, cert=(cert_path, key_path), headers=headers, verify=False)
             response.raise_for_status()
             return Response(response.json())
         except requests.exceptions.RequestException as e:
@@ -416,7 +422,7 @@ class CsrViewSet(viewsets.ModelViewSet):
         url = f"https://fdmsapitest.zimra.co.zw/Device/v1/{user.device_id}/GetStatus"
         
         cert_path = os.path.join(settings.BASE_DIR, 'certificates', f'device_cert_{user.id}.pem')
-        key_path = os.path.join(settings.BASE_DIR, 'certificates', 'private_key.pem')
+        key_path = os.path.join(settings.BASE_DIR, 'certificates', 'private.key')
 
         if not os.path.exists(cert_path) or not os.path.exists(key_path):
             return Response({"detail": "Certificate or key not found"}, status=status.HTTP_400_BAD_REQUEST)
@@ -428,7 +434,7 @@ class CsrViewSet(viewsets.ModelViewSet):
         }
 
         try:
-            response = requests.get(url, cert=(cert_path, key_path), headers=headers, verify=True)
+            response = requests.get(url, cert=(cert_path, key_path), headers=headers, verify=False)
             response.raise_for_status()
             return Response(response.json())
         except requests.exceptions.RequestException as e:
@@ -695,11 +701,345 @@ def register_new_device(request, user_id):
 
 @login_required
 def device_config(request, user_id):
-    """Device configuration view"""
+    """Comprehensive Device Configuration Dashboard"""
     user = get_object_or_404(User, pk=user_id)
     if not request.user.is_superuser and request.user != user:
         return redirect('home')
-    return render(request, 'main/deviceReg.html', {'client': user})
+    
+    # Initialize context data
+    context = {
+        'user': user,
+        'device_info': {},
+        'certificate_status': {},
+        'zimra_config': {},
+        'health_checks': {},
+        'api_endpoints': {},
+        'recent_activity': [],
+        'error_logs': []
+    }
+    
+    # Get device configuration from ZIMRA
+    cert_path = os.path.join(settings.BASE_DIR, 'certificates', f'device_cert_{user.id}.pem')
+    key_path = os.path.join(settings.BASE_DIR, 'certificates', 'private.key')
+    
+    # Check certificate status
+    context['certificate_status'] = {
+        'cert_exists': os.path.exists(cert_path),
+        'key_exists': os.path.exists(key_path),
+        'cert_path': cert_path,
+        'key_path': key_path,
+        'status': 'Valid' if (os.path.exists(cert_path) and os.path.exists(key_path)) else 'Missing'
+    }
+    
+    # Add certificate expiry check if certificate exists
+    if os.path.exists(cert_path):
+        try:
+            from cryptography import x509
+            from cryptography.hazmat.backends import default_backend
+            import datetime
+            
+            with open(cert_path, 'rb') as cert_file:
+                cert_data = cert_file.read()
+                certificate = x509.load_pem_x509_certificate(cert_data, default_backend())
+                
+                context['certificate_status'].update({
+                    'subject': str(certificate.subject),
+                    'issuer': str(certificate.issuer),
+                    'valid_from': certificate.not_valid_before_utc.replace(tzinfo=None),
+                    'valid_until': certificate.not_valid_after_utc.replace(tzinfo=None),
+                    'is_expired': certificate.not_valid_after_utc < datetime.datetime.now(datetime.timezone.utc),
+                    'days_until_expiry': (certificate.not_valid_after_utc - datetime.datetime.now(datetime.timezone.utc)).days
+                })
+        except ImportError:
+            context['certificate_status']['parsing_error'] = 'Cryptography library not available'
+        except Exception as e:
+            context['certificate_status']['parsing_error'] = str(e)
+    
+    # Device configuration data
+    context['device_info'] = {
+        'device_id': user.device_id,
+        'model_name': user.model_name or 'Not Set',
+        'model_version': user.model_version or 'Not Set',
+        'company_name': user.company_name,
+        'registration_status': 'Active' if user.is_active else 'Inactive',
+        'setup_progress': calculate_setup_progress(user),
+        # ZIMRA-specific data
+        'zimra_serial_number': user.zimra_serial_number or 'Not synced',
+        'zimra_firmware_version': user.zimra_firmware_version or 'Not synced',
+        'zimra_device_status': user.zimra_device_status or 'Unknown',
+        'zimra_device_type': user.zimra_device_type or 'Not synced',
+        'zimra_tax_period': user.zimra_tax_period or 'Not synced',
+        'zimra_registration_status': user.zimra_registration_status or 'Unknown',
+        'zimra_last_receipt_number': user.zimra_last_receipt_number or 'None',
+        'zimra_last_sync': user.zimra_last_sync,
+        'has_zimra_data': bool(user.zimra_last_sync)
+    }
+    
+    # ZIMRA API endpoints and configuration
+    context['api_endpoints'] = {
+        'base_url': 'https://fdmsapitest.zimra.co.zw',
+        'get_config': f"https://fdmsapitest.zimra.co.zw/Device/v1/{user.device_id}/GetConfiguration",
+        'get_status': f"https://fdmsapitest.zimra.co.zw/Device/v1/{user.device_id}/GetStatus",
+        'submit_receipt': f"https://fdmsapitest.zimra.co.zw/Receipt/v1/{user.device_id}",
+        'environment': 'Test'
+    }
+    
+    # Test ZIMRA connectivity if certificates exist
+    if context['certificate_status']['cert_exists'] and context['certificate_status']['key_exists']:
+        zimra_status = test_zimra_connectivity(user, cert_path, key_path)
+        context['zimra_config'] = zimra_status
+    else:
+        context['zimra_config'] = {
+            'connection_status': 'No Certificates',
+            'last_test': 'Never',
+            'error': 'Certificates not found'
+        }
+    
+    # Recent submission activity
+    recent_submissions = ReceiptSubmissionLog.objects.filter(
+        receipt__user=user
+    ).order_by('-submission_timestamp')[:10]
+    
+    context['recent_activity'] = recent_submissions
+    
+    # Health checks
+    context['health_checks'] = {
+        'device_configured': bool(user.device_id and user.model_name),
+        'certificates_valid': context['certificate_status']['status'] == 'Valid',
+        'zimra_connected': context['zimra_config'].get('connection_status') == 'Connected',
+        'user_active': user.is_active,
+        'overall_status': 'Healthy' if all([
+            bool(user.device_id and user.model_name),
+            context['certificate_status']['status'] == 'Valid',
+            user.is_active
+        ]) else 'Issues Detected'
+    }
+    
+    # Handle POST requests for configuration updates
+    if request.method == 'POST':
+        action = request.POST.get('action')
+        
+        if action == 'update_device_info':
+            user.model_name = request.POST.get('model_name', user.model_name)
+            user.model_version = request.POST.get('model_version', user.model_version)
+            user.device_id = request.POST.get('device_id', user.device_id)
+            user.save()
+            
+            messages.success(request, 'Device information updated successfully!')
+            return redirect('device_config', user_id=user.id)
+            
+        elif action == 'test_connection':
+            if context['certificate_status']['cert_exists']:
+                test_result = test_zimra_connectivity(user, cert_path, key_path)
+                if test_result.get('connection_status') == 'Connected':
+                    messages.success(request, 'ZIMRA connection test successful!')
+                else:
+                    messages.error(request, f"Connection test failed: {test_result.get('error', 'Unknown error')}")
+            else:
+                messages.error(request, 'Cannot test connection: Certificates not found')
+            return redirect('device_config', user_id=user.id)
+            
+        elif action == 'sync_with_zimra':
+            # Implement ZIMRA synchronization
+            sync_result = sync_device_with_zimra(user)
+            if sync_result['success']:
+                updated_fields = sync_result.get('updated_fields', {})
+                field_count = sum(1 for v in updated_fields.values() if v and v != 'Not synced' and v != 'Unknown')
+                if field_count > 0:
+                    messages.success(request, f'Device synchronized with ZIMRA successfully! Updated {field_count} fields from ZIMRA servers.')
+                else:
+                    messages.info(request, 'Synchronized with ZIMRA, but no new data was available.')
+                
+                if sync_result.get('errors'):
+                    for error in sync_result['errors']:
+                        messages.warning(request, f"Partial sync issue: {error}")
+            else:
+                messages.error(request, f"Synchronization failed: {sync_result.get('error')}")
+            return redirect('device_config', user_id=user.id)
+    
+    return render(request, 'main/device_config.html', context)
+
+def calculate_setup_progress(user):
+    """Calculate device setup completion percentage"""
+    completed_steps = 0
+    total_steps = 6  # Increased to include ZIMRA sync
+    
+    if user.device_id:
+        completed_steps += 1
+    if user.model_name:
+        completed_steps += 1
+    if user.is_active:
+        completed_steps += 1
+    
+    cert_path = os.path.join(settings.BASE_DIR, 'certificates', f'device_cert_{user.id}.pem')
+    if os.path.exists(cert_path):
+        completed_steps += 1
+    
+    # Check if user has made any receipts
+    if Receipt.objects.filter(user=user).exists():
+        completed_steps += 1
+    
+    # Check if ZIMRA data has been synced
+    if user.zimra_last_sync:
+        completed_steps += 1
+    
+    return int((completed_steps / total_steps) * 100)
+
+def test_zimra_connectivity(user, cert_path, key_path):
+    """Test connectivity to ZIMRA API"""
+    try:
+        url = f"https://fdmsapitest.zimra.co.zw/Device/v1/{user.device_id}/GetStatus"
+        headers = {
+            "Content-Type": "application/json",
+            "DeviceModelName": user.model_name or "DefaultModel",
+            "DeviceModelVersion": user.model_version or "1.0"
+        }
+        
+        # Try alternative endpoints for better compatibility
+        urls_to_try = [
+            f"https://fdmsapitest.zimra.co.zw/Device/v1/{user.device_id}/GetStatus",
+            f"https://fdmsapitest.zimra.co.zw/Device/v1/{user.device_id}/GetConfiguration",
+            f"https://fdmsapitest.zimra.co.zw/api/v1/device/{user.device_id}/status"
+        ]
+        
+        last_response = None
+        for test_url in urls_to_try:
+            try:
+                response = requests.get(test_url, cert=(cert_path, key_path), headers=headers, verify=False, timeout=30)
+                last_response = response
+                
+                print(f"Testing URL: {test_url}")
+                print(f"Status: {response.status_code}")
+                print(f"Response: {response.text[:200]}...")
+                
+                if response.status_code == 200:
+                    return {
+                        'connection_status': 'Connected',
+                        'last_test': timezone.now(),
+                        'response_time': response.elapsed.total_seconds(),
+                        'zimra_response': response.json(),
+                        'successful_url': test_url
+                    }
+            except Exception as e:
+                print(f"URL {test_url} failed: {e}")
+                continue
+        
+        # If we get here, all URLs failed
+        response = last_response
+        if response:
+            return {
+                'connection_status': 'Error',
+                'last_test': timezone.now(),
+                'error': f"HTTP {response.status_code}: {response.text}",
+                'response_time': response.elapsed.total_seconds()
+            }
+        else:
+            return {
+                'connection_status': 'Failed',
+                'last_test': timezone.now(),
+                'error': "All API endpoints failed",
+                'response_time': None
+            }
+            
+    except requests.exceptions.RequestException as e:
+        return {
+            'connection_status': 'Failed',
+            'last_test': timezone.now(),
+            'error': str(e),
+            'response_time': None
+        }
+
+def sync_device_with_zimra(user):
+    """Synchronize device configuration with ZIMRA"""
+    cert_path = os.path.join(settings.BASE_DIR, 'certificates', f'device_cert_{user.id}.pem')
+    key_path = os.path.join(settings.BASE_DIR, 'certificates', 'private.key')
+    
+    if not (os.path.exists(cert_path) and os.path.exists(key_path)):
+        return {'success': False, 'error': 'Certificates not found'}
+    
+    try:
+        # Get current configuration from ZIMRA
+        config_url = f"https://fdmsapitest.zimra.co.zw/Device/v1/{user.device_id}/GetConfiguration"
+        status_url = f"https://fdmsapitest.zimra.co.zw/Device/v1/{user.device_id}/GetStatus"
+        headers = {
+            "Content-Type": "application/json",
+            "DeviceModelName": user.model_name or "DefaultModel",
+            "DeviceModelVersion": user.model_version or "1.0"
+        }
+        
+        # Get both configuration and status from ZIMRA (disable SSL verification for test environment)
+        config_response = requests.get(config_url, cert=(cert_path, key_path), headers=headers, verify=False, timeout=30)
+        status_response = requests.get(status_url, cert=(cert_path, key_path), headers=headers, verify=False, timeout=30)
+        
+        success = True
+        zimra_data = {}
+        error_messages = []
+        
+        # Process configuration response
+        if config_response.status_code == 200:
+            config_data = config_response.json()
+            zimra_data['configuration'] = config_data
+            
+            # Update user fields with ZIMRA configuration data
+            if 'serialNumber' in config_data:
+                user.zimra_serial_number = config_data['serialNumber']
+            if 'firmwareVersion' in config_data:
+                user.zimra_firmware_version = config_data['firmwareVersion']
+            if 'deviceType' in config_data:
+                user.zimra_device_type = config_data['deviceType']
+            if 'taxPeriod' in config_data:
+                user.zimra_tax_period = config_data['taxPeriod']
+            if 'modelName' in config_data and not user.model_name:
+                user.model_name = config_data['modelName']
+            if 'modelVersion' in config_data and not user.model_version:
+                user.model_version = config_data['modelVersion']
+                
+        else:
+            error_messages.append(f"Config API returned HTTP {config_response.status_code}")
+            success = False
+        
+        # Process status response
+        if status_response.status_code == 200:
+            status_data = status_response.json()
+            zimra_data['status'] = status_data
+            
+            # Update user fields with ZIMRA status data
+            if 'deviceStatus' in status_data:
+                user.zimra_device_status = status_data['deviceStatus']
+            if 'registrationStatus' in status_data:
+                user.zimra_registration_status = status_data['registrationStatus']
+            if 'lastReceiptNumber' in status_data:
+                user.zimra_last_receipt_number = status_data['lastReceiptNumber']
+                
+        else:
+            error_messages.append(f"Status API returned HTTP {status_response.status_code}")
+            
+        # Store complete ZIMRA response data
+        user.zimra_response_data = zimra_data
+        user.zimra_last_sync = timezone.now()
+        user.save()
+        
+        return {
+            'success': success,
+            'zimra_data': zimra_data,
+            'sync_time': timezone.now(),
+            'errors': error_messages if error_messages else None,
+            'updated_fields': {
+                'serial_number': user.zimra_serial_number,
+                'firmware_version': user.zimra_firmware_version,
+                'device_status': user.zimra_device_status,
+                'registration_status': user.zimra_registration_status,
+                'device_type': user.zimra_device_type,
+                'tax_period': user.zimra_tax_period,
+                'last_receipt_number': user.zimra_last_receipt_number
+            }
+        }
+        
+    except Exception as e:
+        return {
+            'success': False,
+            'error': str(e)
+        }
 
 @login_required
 def confirm_device_reg(request, user_id):

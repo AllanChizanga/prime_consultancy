@@ -5,12 +5,12 @@
 
       <li class="nav-item">
         {% if request.user.is_superuser %}
-        <a class="nav-link " href="{% url 'admin_dashboard' %}">
+        <a class="nav-link" href="{% url 'admin_dashboard' %}" data-page="admin_dashboard">
           <i class="bi bi-grid"></i>
           <span>Admin</span>
         </a>
         {% else %}
-        <a class="nav-link " href="{% url 'home' %}">
+        <a class="nav-link" href="{% url 'home' %}" data-page="home">
           <i class="bi bi-grid"></i>
           <span>Dashboard</span>
         </a>
@@ -21,27 +21,27 @@
 
       <li class="nav-item">
         {% if request.user.is_superuser %}
-        <a class="nav-link collapsed" href="{% url 'registered_clients' %}">
-          <i class="bi bi-kanban"></i>
+        <a class="nav-link collapsed" href="{% url 'registered_clients' %}" data-page="registered_clients">
+          <i class="bi bi-people"></i>
           <span>Registered Clients</span>
         </a>
         {% else %}
-        <a class="nav-link collapsed" href="{% url 'device_status' request.user.id %}">
-          <i class="bi bi-kanban"></i>
+        <a class="nav-link collapsed" href="{% url 'device_status' request.user.id %}" data-page="device_status">
+          <i class="bi bi-hdd-stack"></i>
           <span>Device Status</span>
         </a>
 
-        <a class="nav-link collapsed mt-1" href="{% url 'device_config' request.user.id %}">
-          <i class="bi bi-kanban"></i>
+        <a class="nav-link collapsed mt-1" href="{% url 'device_config' request.user.id %}" data-page="device_config">
+          <i class="bi bi-gear"></i>
           <span>Device Config</span>
         </a>
 
-        <a class="nav-link collapsed mt-1" href="{% url 'submit_receipt' %}">
-          <i class="bi bi-kanban"></i>
+        <a class="nav-link collapsed mt-1" href="{% url 'submit_receipt' %}" data-page="submit_receipt">
+          <i class="bi bi-receipt"></i>
           <span>Submit Receipt</span>
         </a>
-        <a class="nav-link collapsed mt-1" href="{% url 'submit_invoice' %}">
-          <i class="bi bi-kanban"></i>
+        <a class="nav-link collapsed mt-1" href="{% url 'submit_invoice' %}" data-page="submit_invoice">
+          <i class="bi bi-file-earmark-text"></i>
           <span>Submit Invoice</span>
         </a>
         {% endif %}
@@ -50,19 +50,19 @@
       {% if request.user.is_superuser %}
       {% else %}
       <li class="nav-item">
-        <a class="nav-link collapsed" data-bs-target="#icons-nav" data-bs-toggle="collapse" href="#">
-            <i class="bi bi-gem"></i><span>Fiscal day</span><i class="bi bi-chevron-down ms-auto"></i>
+        <a class="nav-link collapsed" data-bs-target="#icons-nav" data-bs-toggle="collapse" href="#" data-page="fiscal_day">
+            <i class="bi bi-calendar-date"></i><span>Fiscal day</span><i class="bi bi-chevron-down ms-auto"></i>
         </a>
-        <ul id="icons-nav" class="nav-content collapse " data-bs-parent="#sidebar-nav">
+        <ul id="icons-nav" class="nav-content collapse" data-bs-parent="#sidebar-nav">
             <li>
-                <a class="text-white" href="{% url 'open_fiscal_day' %}">
-                    <i class=""></i><span>Open</span>
+                <a class="text-white" href="{% url 'open_fiscal_day' %}" data-page="open_fiscal_day">
+                    <i class="bi bi-circle"></i><span>Open</span>
                  
                 </a>
             </li>
             <li>
-              <a class="text-white" href="{% url 'close_fiscal_day' %}">
-                  <i class=""></i><span>Close</span>
+              <a class="text-white" href="{% url 'close_fiscal_day' %}" data-page="close_fiscal_day">
+                  <i class="bi bi-circle"></i><span>Close</span>
               </a>
           </li>
            
@@ -72,14 +72,14 @@
       {% endif %}
 
       <li class="nav-item">
-        <a class="nav-link collapsed" href="{% url 'profile' %}">
+        <a class="nav-link collapsed" href="{% url 'profile' %}" data-page="profile">
           <i class="bi bi-person"></i>
           <span>Profile</span>
         </a>
       </li><!-- End Profile Page Nav -->
 
       <li class="nav-item">
-        <a class="nav-link collapsed" href="{% url 'logout' %}">
+        <a class="nav-link collapsed" href="{% url 'logout' %}" data-page="logout">
           <i class="bi bi-box-arrow-in-right"></i>
           <span>Sign out</span>
         </a>
@@ -88,3 +88,68 @@
     </ul>
 
   </aside><!-- End Sidebar-->
+
+  <script>
+  document.addEventListener('DOMContentLoaded', function() {
+    // Get current URL path
+    const currentPath = window.location.pathname;
+    
+    // Remove active class from all nav links
+    document.querySelectorAll('.sidebar-nav .nav-link').forEach(link => {
+      link.classList.remove('active');
+      link.classList.add('collapsed');
+    });
+    
+    document.querySelectorAll('.sidebar-nav .nav-content a').forEach(link => {
+      link.classList.remove('active');
+    });
+    
+    // Function to set active state
+    function setActiveLink(selector) {
+      const link = document.querySelector(selector);
+      if (link) {
+        link.classList.remove('collapsed');
+        link.classList.add('active');
+      }
+    }
+    
+    // Check current page and set active state
+    if (currentPath === '/' || currentPath === '/admin-dashboard/') {
+      setActiveLink('[data-page="home"], [data-page="admin_dashboard"]');
+    } else if (currentPath.includes('/registered-clients/')) {
+      setActiveLink('[data-page="registered_clients"]');
+    } else if (currentPath.includes('/device-status/')) {
+      setActiveLink('[data-page="device_status"]');
+    } else if (currentPath.includes('/device-config/')) {
+      setActiveLink('[data-page="device_config"]');
+    } else if (currentPath.includes('/submit-receipt/')) {
+      setActiveLink('[data-page="submit_receipt"]');
+    } else if (currentPath.includes('/submit-invoice/')) {
+      setActiveLink('[data-page="submit_invoice"]');
+    } else if (currentPath.includes('/open-fiscal-day/')) {
+      setActiveLink('[data-page="fiscal_day"]');
+      document.querySelector('[data-page="open_fiscal_day"]').classList.add('active');
+      document.querySelector('#icons-nav').classList.add('show');
+    } else if (currentPath.includes('/close-fiscal-day/')) {
+      setActiveLink('[data-page="fiscal_day"]');
+      document.querySelector('[data-page="close_fiscal_day"]').classList.add('active');
+      document.querySelector('#icons-nav').classList.add('show');
+    } else if (currentPath.includes('/profile/')) {
+      setActiveLink('[data-page="profile"]');
+    }
+    
+    // Add hover effects
+    document.querySelectorAll('.sidebar-nav .nav-link').forEach(link => {
+      link.addEventListener('mouseenter', function() {
+        if (!this.classList.contains('active')) {
+          this.style.transform = 'translateX(3px)';
+          this.style.transition = 'transform 0.2s ease';
+        }
+      });
+      
+      link.addEventListener('mouseleave', function() {
+        this.style.transform = 'translateX(0)';
+      });
+    });
+  });
+  </script>
