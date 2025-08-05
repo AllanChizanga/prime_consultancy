@@ -1,0 +1,103 @@
+{% extends 'main/MainLayout.html' %} {% load static %} {% block content %}
+
+{% if messages %}
+    {% for message in messages %}
+    <div class="alert alert-warning alert-dismissible fade show" role="alert">
+      <strong>{{message}}</strong>
+      <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+    </div>
+    {% endfor %}
+{% endif %}
+
+
+<div class="pagetitle card p-3">
+  <h1>Dashboard</h1>
+  <nav>
+    <ol class="breadcrumb">
+      <li class="breadcrumb-item"><a href="">Home</a></li>
+      <li class="breadcrumb-item active">Dashboard</li>
+    </ol>
+  </nav>
+  <h1>Clients</h1>
+  <br>
+  <table class="table">
+    <thead>
+      <tr>
+        <th scope="col">Company</th>
+        <th scope="col">Branch</th>
+        <th scope="col">Email</th>
+        <th scope="col">Phone Number</th>
+        <th scope = "col">Status</th>
+        <th scope="col">Action</th>
+      </tr>
+    </thead>
+    <tbody>
+        {% for client in clients %}
+        {% if client.email == 'admin@primeconsultancy.com' %}
+        {% else %}
+        <tr>
+            <td>{{client.company_name}}</td>
+            <td>{{client.company_branch}}</td>
+            <td><a href="mailto:{{client.email}}">{{client.email}}</a></td>
+            <td><a href="tel:{{client.phone_number}}">{{client.phone_number}}</a></td>
+            <td>
+                {% if client.is_active == True %}
+                <div class="btn-group">
+                    <button type="button" class="btn btn-success " aria-haspopup="true" aria-expanded="false">
+                    Active
+                    </button>
+                </div>
+                {% else %}
+                                    <!-- Example single danger button -->
+                    <div class="btn-group">
+                        <button type="button" class="btn btn-warning " aria-haspopup="true" aria-expanded="false">
+                        InActive
+                        </button>
+                    </div>
+                {% endif %}
+
+            </td>
+            <td>
+              <div class="btn-group">
+                <a style="padding: 2px;" href="{% url 'client_info' client.id %}">
+                  <button type="button" class="btn btn-primary " aria-haspopup="true" aria-expanded="false">
+                    Info
+                    </button>
+                </a>
+                <a>
+                  <button type="button" class="btn btn-danger" data-bs-toggle="modal" data-bs-target="#exampleModal" aria-haspopup="true" aria-expanded="false">
+                    Delete
+                    </button>
+                </a>
+            </div>
+            </td>
+        </tr>
+      {% endif %}
+      {% endfor %}
+    </table>
+    </tbody>
+
+
+<!-- Modal -->
+<div class="modal fade" id="exampleModal" tabindex="-1" aria-labelledby="exampleModalLabel" aria-hidden="true">
+  <div class="modal-dialog">
+    <div style="background-color: rgb(255, 211, 161);" class="modal-content">
+      <div class="modal-header">
+        <h1 class="modal-title fs-5 text-danger" id="exampleModalLabel">Delete Client</h1>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body text-danger">
+        Are you sure you want to delete this client!
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-warning" data-bs-dismiss="modal">Close</button>
+        <button type="button" class="btn btn-danger">Confirm</button>
+      </div>
+    </div>
+  </div>
+</div>
+ 
+</div>
+<!-- End Page Title -->
+
+{% endblock content %}

@@ -1,0 +1,23 @@
+{% extends 'main/MainLayout.html' %} {% load static %} {% block content %}
+{% if messages %}
+{% for message in messages %}
+<div class="alert alert-info alert-dismissible fade show" role="alert">
+  <strong>{{message}}</strong>
+  <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+</div>
+{% endfor %}
+{% endif %}
+<div class="pagetitle card p-3">
+ 
+  <h1>Dashboard</h1>
+  <nav>
+    <ol class="breadcrumb">
+      <li class="breadcrumb-item"><a href="">Home</a></li>
+      <li class="breadcrumb-item active">Dashboard</li>
+    </ol>
+  </nav>
+  <h1>Welcome to Client home page</h1>
+</div>
+<!-- End Page Title -->
+
+{% endblock content %}

@@ -1,0 +1,58 @@
+Understanding the Need for Certificates
+Before diving into the code, it’s crucial to understand why some endpoints require certificates. In simple terms, a certificate, especially an SSL/TLS certificate, acts as a digital passport for secure communication over the internet. It ensures that the data transferred between your client application and the server is encrypted and secure from eavesdropping.
+
+There are two types of certificates you might encounter:
+
+Public Certificates: Used for server authentication. These are the certificates that your browser checks when you visit a secure website (HTTPS).
+Client-Side Certificates: Sometimes, a server requires the client (your application) to authenticate itself using a certificate. This adds an extra layer of security.
+Preparing Your Python Environment
+To make HTTPS requests in Python, we’ll use the requests library. If you don't have it installed, you can install it via pip:
+
+pip install requests
+Next, ensure you have the required client-side certificate. This is usually provided by the API provider or your IT department.
+
+In this example, I have created a PFX certificate and converted it to PEM using this command:
+
+openssl pkcs12 -in certificate.pfx -out certificate.pem -nodes
+Extracted the private key:
+
+openssl pkcs12 -in certificate.pfx -nocerts -out certificate-key.key
+Run this command to decrypt the private key:
+
+openssl rsa -in certificate-key.key -out certificate.key
+Crafting the Request
+Let’s dive into the code. We’ll use the requests library to make a GET request to a secure endpoint.
+
+Step 1: Import the Requests Module
+First, import the requests module in your Python script.
+
+import requests
+Step 2: Load Your Certificate
+You’ll typically have your certificate and private key in .pem or .crt and .key files, respectively. Here's how to load them:
+
+# Path to your certificate and private key
+cert_path = 'certificate.pem'
+key_path = 'certificate.key'
+Step 3: Make the Request
+Now, make the request to your secure endpoint:
+
+# The secure endpoint URL
+url = 'https://secure-endpoint.example.com/api'
+# Making the request with the certificate
+response = requests.get(url, cert=(cert_path, key_path))
+
+# Printing the response
+print(response.content)
+This code sends a GET request to the specified URL using the provided client-side certificate and private key for authentication.
+
+If you are running in Windows and has full path, you can either of the 2 things below:
+
+# You can use '\' to escape character
+cert_path = 'C:\\certificate_dir\\certificate.pem'
+key_path = 'C:\\certificate_dir\\certificate.key'
+
+# Or use 'r' to denote raw string
+cert_path = r'C:\certificate_dir\certificate.pem'
+key_path = r'C:\certificate_dir\certificate.key'
+Handling Common Errors
+When working with certificates, you might encounter errors such as certificate verification failures. These can often be resolved by ensuring the certificate path is correct, the certificate is not expired, and it’s in the correct format.

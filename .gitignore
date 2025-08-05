@@ -1,0 +1,6 @@
+migrations/
+static/
+hy.py
+ht.py
+venv/
+db.sqlite3

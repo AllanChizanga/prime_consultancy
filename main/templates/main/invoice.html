@@ -1,0 +1,239 @@
+{% extends 'main/MainLayout.html' %} {% load static %} {% load crispy_forms_tags %}
+
+{% block content %}
+<div class="pagetitle">
+  <h1>Submit Invoice</h1>
+  <nav>
+    <ol class="breadcrumb">
+      <li class="breadcrumb-item"><a href="{% url 'home' %}">Home</a></li>
+      <li class="breadcrumb-item active">Submit Invoice</li>
+    </ol>
+  </nav>
+</div>
+
+<div class="container-fluid">
+  <div class="row">
+    <div class="col-12">
+      
+      <form method="post">
+        {% csrf_token %}
+        
+        <!-- Buyer Information Card -->
+        <div class="card mb-4">
+          <div class="card-header">
+            <h5 class="card-title mb-0"><i class="bi bi-person-circle"></i> Buyer Information (Optional)</h5>
+          </div>
+          <div class="card-body">
+            <div class="row">
+              {% for field in buyer_form.visible_fields %}
+                <div class="col-md-6 col-lg-4 mb-3">
+                  {{ field|as_crispy_field }}
+                  {% if field.help_text %}
+                    <small class="form-text text-muted">{{ field.help_text }}</small>
+                  {% endif %}
+                </div>
+              {% endfor %}
+            </div>
+          </div>
+        </div>
+
+        <!-- Receipt Information Card -->
+        <div class="card mb-4">
+          <div class="card-header">
+            <h5 class="card-title mb-0"><i class="bi bi-receipt"></i> Receipt Information</h5>
+          </div>
+          <div class="card-body">
+            <div class="row">
+              {% for field in receipt_form.visible_fields %}
+                <div class="col-md-6 col-lg-4 mb-3">
+                  {{ field|as_crispy_field }}
+                  {% if field.help_text %}
+                    <small class="form-text text-muted">{{ field.help_text }}</small>
+                  {% endif %}
+                </div>
+              {% endfor %}
+            </div>
+          </div>
+        </div>
+        
+        <!-- Receipt Lines Card -->
+        <div class="card mb-4">
+          <div class="card-header d-flex justify-content-between align-items-center">
+            <h5 class="card-title mb-0"><i class="bi bi-list-ul"></i> Receipt Lines</h5>
+            <button type="button" class="btn btn-primary btn-sm" onclick="addReceiptLine()">
+              <i class="bi bi-plus-circle"></i> Add Line
+            </button>
+          </div>
+          <div class="card-body">
+            {{ line_formset.management_form }}
+            <div id="receipt-lines-container">
+              {% for form in line_formset %}
+                <div class="receipt-line border rounded p-3 mb-3 bg-light">
+                  <div class="row">
+                    {% for field in form.visible_fields %}
+                      <div class="col-md-6 col-lg-2 mb-2">
+                        {{ field|as_crispy_field }}
+                      </div>
+                    {% endfor %}
+                  </div>
+                </div>
+              {% endfor %}
+            </div>
+          </div>
+        </div>
+
+        <!-- Receipt Taxes Card -->
+        <div class="card mb-4">
+          <div class="card-header d-flex justify-content-between align-items-center">
+            <h5 class="card-title mb-0"><i class="bi bi-calculator"></i> Receipt Taxes</h5>
+            <button type="button" class="btn btn-primary btn-sm" onclick="addReceiptTax()">
+              <i class="bi bi-plus-circle"></i> Add Tax
+            </button>
+          </div>
+          <div class="card-body">
+            {{ tax_formset.management_form }}
+            <div id="receipt-taxes-container">
+              {% for form in tax_formset %}
+                <div class="receipt-tax border rounded p-3 mb-3 bg-light">
+                  <div class="row">
+                    {% for field in form.visible_fields %}
+                      <div class="col-md-6 col-lg-2 mb-2">
+                        {{ field|as_crispy_field }}
+                      </div>
+                    {% endfor %}
+                  </div>
+                </div>
+              {% endfor %}
+            </div>
+          </div>
+        </div>
+
+        <!-- Submit Button -->
+        <div class="card">
+          <div class="card-body text-center py-4">
+            <button type="submit" class="btn btn-success btn-lg px-5 py-3">
+              <i class="bi bi-check-circle me-2"></i> Submit Invoice
+            </button>
+          </div>
+        </div>
+        
+      </form>
+    </div>
+  </div>
+</div>
+
+<script>
+  function addReceiptLine() {
+      const container = document.getElementById("receipt-lines-container");
+      const totalForms = document.getElementById("id_line_formset-TOTAL_FORMS");
+      const formCount = parseInt(totalForms.value);
+
+      // Create new form element with proper structure
+      const newFormHTML = `
+        <div class="receipt-line border rounded p-3 mb-3 bg-light">
+          <div class="row">
+            <div class="col-md-6 col-lg-2 mb-2">
+              <div class="form-group">
+                <label for="id_line_formset-${formCount}-line_type">Line Type:</label>
+                <select name="line_formset-${formCount}-line_type" id="id_line_formset-${formCount}-line_type" class="form-control">
+                  <option value="">---------</option>
+                  <option value="Sales">Sales</option>
+                  <option value="Discount">Discount</option>
+                </select>
+              </div>
+            </div>
+            <div class="col-md-6 col-lg-2 mb-2">
+              <div class="form-group">
+                <label for="id_line_formset-${formCount}-line_name">Line Name:</label>
+                <input type="text" name="line_formset-${formCount}-line_name" id="id_line_formset-${formCount}-line_name" class="form-control">
+              </div>
+            </div>
+            <div class="col-md-6 col-lg-2 mb-2">
+              <div class="form-group">
+                <label for="id_line_formset-${formCount}-line_price">Price:</label>
+                <input type="number" step="0.01" name="line_formset-${formCount}-line_price" id="id_line_formset-${formCount}-line_price" class="form-control">
+              </div>
+            </div>
+            <div class="col-md-6 col-lg-2 mb-2">
+              <div class="form-group">
+                <label for="id_line_formset-${formCount}-line_quantity">Quantity:</label>
+                <input type="number" step="0.01" name="line_formset-${formCount}-line_quantity" id="id_line_formset-${formCount}-line_quantity" class="form-control">
+              </div>
+            </div>
+            <div class="col-md-6 col-lg-2 mb-2">
+              <div class="form-group">
+                <label for="id_line_formset-${formCount}-tax_percent">Tax %:</label>
+                <input type="number" step="0.01" name="line_formset-${formCount}-tax_percent" id="id_line_formset-${formCount}-tax_percent" class="form-control">
+              </div>
+            </div>
+            <div class="col-md-6 col-lg-2 mb-2">
+              <button type="button" class="btn btn-danger btn-sm mt-4" onclick="removeReceiptLine(this)">
+                <i class="bi bi-trash"></i> Remove
+              </button>
+            </div>
+          </div>
+        </div>
+      `;
+
+      container.insertAdjacentHTML('beforeend', newFormHTML);
+      totalForms.value = formCount + 1;
+  }
+
+  function addReceiptTax() {
+      const container = document.getElementById("receipt-taxes-container");
+      const totalForms = document.getElementById("id_tax_formset-TOTAL_FORMS");
+      const formCount = parseInt(totalForms.value);
+
+      const newFormHTML = `
+        <div class="receipt-tax border rounded p-3 mb-3 bg-light">
+          <div class="row">
+            <div class="col-md-6 col-lg-2 mb-2">
+              <div class="form-group">
+                <label for="id_tax_formset-${formCount}-taxCode">Tax Code:</label>
+                <input type="text" name="tax_formset-${formCount}-taxCode" id="id_tax_formset-${formCount}-taxCode" class="form-control">
+              </div>
+            </div>
+            <div class="col-md-6 col-lg-2 mb-2">
+              <div class="form-group">
+                <label for="id_tax_formset-${formCount}-taxPercent">Tax Percent:</label>
+                <input type="number" step="0.01" name="tax_formset-${formCount}-taxPercent" id="id_tax_formset-${formCount}-taxPercent" class="form-control">
+              </div>
+            </div>
+            <div class="col-md-6 col-lg-2 mb-2">
+              <div class="form-group">
+                <label for="id_tax_formset-${formCount}-taxAmount">Tax Amount:</label>
+                <input type="number" step="0.01" name="tax_formset-${formCount}-taxAmount" id="id_tax_formset-${formCount}-taxAmount" class="form-control">
+              </div>
+            </div>
+            <div class="col-md-6 col-lg-2 mb-2">
+              <button type="button" class="btn btn-danger btn-sm mt-4" onclick="removeReceiptTax(this)">
+                <i class="bi bi-trash"></i> Remove
+              </button>
+            </div>
+          </div>
+        </div>
+      `;
+
+      container.insertAdjacentHTML('beforeend', newFormHTML);
+      totalForms.value = formCount + 1;
+  }
+
+  function removeReceiptLine(button) {
+      const lineDiv = button.closest('.receipt-line');
+      lineDiv.remove();
+      
+      // Update total forms count
+      const totalForms = document.getElementById("id_line_formset-TOTAL_FORMS");
+      totalForms.value = parseInt(totalForms.value) - 1;
+  }
+
+  function removeReceiptTax(button) {
+      const taxDiv = button.closest('.receipt-tax');
+      taxDiv.remove();
+      
+      // Update total forms count
+      const totalForms = document.getElementById("id_tax_formset-TOTAL_FORMS");
+      totalForms.value = parseInt(totalForms.value) - 1;
+  }
+</script>
+{% endblock content %}

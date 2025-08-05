@@ -1,0 +1,26 @@
+{% extends 'main/MainLayout.html' %} {% load static %} {% block content %}
+
+<div class="pagetitle card p-3">
+  <h1>Dashboard</h1>
+  <nav>
+    <ol class="breadcrumb">
+      <li class="breadcrumb-item"><a href="">Home</a></li>
+      <li class="breadcrumb-item active">Dashboard</li>
+    </ol>
+  </nav>
+  <h1>Confirm Device Registration for {{client.company_name}}</h1>
+  <br>
+  <a href="{% url 'confirm_device_reg' client.id %}">
+    <button
+      type="button"
+      class="btn btn-primary"
+      data-bs-toggle="modal"
+      data-bs-target="#exampleModal"
+    >
+      Register New Device
+    </button>
+  </a>
+</div>
+<!-- End Page Title -->
+
+{% endblock content %}

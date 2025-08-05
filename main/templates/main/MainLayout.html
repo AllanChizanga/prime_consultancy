@@ -1,0 +1,23 @@
+<!DOCTYPE html>
+{% load static %}
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    {% include 'main/layouts/links.html' %}
+    
+    <title>Prime Consultancy</title>
+</head>
+<body> 
+    {% include 'main/layouts/topbar.html' %}
+    {% include 'main/layouts/sidebar.html' %}
+    <main class="main" id="main">
+        {% block content %} 
+
+
+        {% endblock %}
+    </main>
+    {% include 'main/layouts/scripts.html' %}
+    
+</body>
+</html>

@@ -1,0 +1,90 @@
+  <!-- ======= Sidebar ======= -->
+  <aside id="sidebar" class="sidebar">
+
+    <ul class="sidebar-nav" id="sidebar-nav">
+
+      <li class="nav-item">
+        {% if request.user.is_superuser %}
+        <a class="nav-link " href="{% url 'admin_dashboard' %}">
+          <i class="bi bi-grid"></i>
+          <span>Admin</span>
+        </a>
+        {% else %}
+        <a class="nav-link " href="{% url 'home' %}">
+          <i class="bi bi-grid"></i>
+          <span>Dashboard</span>
+        </a>
+          {% endif %}
+      </li><!-- End Dashboard Nav -->
+
+      <li class="nav-heading">Pages</li>
+
+      <li class="nav-item">
+        {% if request.user.is_superuser %}
+        <a class="nav-link collapsed" href="{% url 'registered_clients' %}">
+          <i class="bi bi-kanban"></i>
+          <span>Registered Clients</span>
+        </a>
+        {% else %}
+        <a class="nav-link collapsed" href="{% url 'device_status' request.user.id %}">
+          <i class="bi bi-kanban"></i>
+          <span>Device Status</span>
+        </a>
+
+        <a class="nav-link collapsed mt-1" href="{% url 'device_config' request.user.id %}">
+          <i class="bi bi-kanban"></i>
+          <span>Device Config</span>
+        </a>
+
+        <a class="nav-link collapsed mt-1" href="{% url 'submit_receipt' %}">
+          <i class="bi bi-kanban"></i>
+          <span>Submit Receipt</span>
+        </a>
+        <a class="nav-link collapsed mt-1" href="{% url 'submit_invoice' %}">
+          <i class="bi bi-kanban"></i>
+          <span>Submit Invoice</span>
+        </a>
+        {% endif %}
+      </li><!-- End Register Page Nav -->
+
+      {% if request.user.is_superuser %}
+      {% else %}
+      <li class="nav-item">
+        <a class="nav-link collapsed" data-bs-target="#icons-nav" data-bs-toggle="collapse" href="#">
+            <i class="bi bi-gem"></i><span>Fiscal day</span><i class="bi bi-chevron-down ms-auto"></i>
+        </a>
+        <ul id="icons-nav" class="nav-content collapse " data-bs-parent="#sidebar-nav">
+            <li>
+                <a class="text-white" href="{% url 'open_fiscal_day' %}">
+                    <i class=""></i><span>Open</span>
+                 
+                </a>
+            </li>
+            <li>
+              <a class="text-white" href="{% url 'close_fiscal_day' %}">
+                  <i class=""></i><span>Close</span>
+              </a>
+          </li>
+           
+        </ul>
+    </li><!-- End Icons Nav -->
+
+      {% endif %}
+
+      <li class="nav-item">
+        <a class="nav-link collapsed" href="{% url 'profile' %}">
+          <i class="bi bi-person"></i>
+          <span>Profile</span>
+        </a>
+      </li><!-- End Profile Page Nav -->
+
+      <li class="nav-item">
+        <a class="nav-link collapsed" href="{% url 'logout' %}">
+          <i class="bi bi-box-arrow-in-right"></i>
+          <span>Sign out</span>
+        </a>
+      </li><!-- End Login Page Nav -->
+
+    </ul>
+
+  </aside><!-- End Sidebar-->
