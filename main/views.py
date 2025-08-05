@@ -6,12 +6,13 @@ from django.contrib.auth import authenticate, login, logout, update_session_auth
 from django.contrib.auth.decorators import login_required
 from django.contrib.auth.forms import PasswordChangeForm
 from django.conf import settings
+from django.db.models import Count, Q
 import os
 import json
 import requests
 from django.utils import timezone
 from rest_framework_simplejwt.tokens import RefreshToken
-from .models import User, FiscalDay, Receipt, ReceiptLine, ReceiptTax, Buyer, CreditDebitNote, Csr
+from .models import User, FiscalDay, Receipt, ReceiptLine, ReceiptTax, Buyer, CreditDebitNote, Csr, ReceiptSubmissionLog
 from .serializers import (
     UserSerializer, FiscalDaySerializer, ReceiptSerializer, 
     ReceiptLineSerializer, ReceiptTaxSerializer, BuyerSerializer,
@@ -221,25 +222,107 @@ class ReceiptViewSet(viewsets.ModelViewSet):
 
     @action(detail=False, methods=['post'])
     def submit_receipt(self, request):
-        url = f'https://fdmsapitest.zimra.co.zw/Device/v1/{request.user.device_id}/SubmitReceipt'
-        cert_path = os.path.join(settings.BASE_DIR, 'certificates', f'device_cert_{request.user.id}.pem')
+        """Enhanced ZIMRA receipt submission with error handling"""
+        user = request.user
+        
+        # Check if user has valid certificate
+        cert_path = os.path.join(settings.BASE_DIR, 'certificates', f'device_cert_{user.id}.pem')
         key_path = os.path.join(settings.BASE_DIR, 'certificates', 'private.key')
 
         if not os.path.exists(cert_path) or not os.path.exists(key_path):
-            return Response({"detail": "Certificate or key not found"}, status=status.HTTP_400_BAD_REQUEST)
+            return Response({
+                "detail": "Certificate or key not found. Please ensure device is properly registered.",
+                "error_code": "CERT_NOT_FOUND"
+            }, status=status.HTTP_400_BAD_REQUEST)
 
+        # Validate device configuration
+        if not user.device_id or not user.model_name:
+            return Response({
+                "detail": "Device not properly configured. Please complete device registration.",
+                "error_code": "DEVICE_NOT_CONFIGURED"
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        url = f'https://fdmsapitest.zimra.co.zw/Device/v1/{user.device_id}/SubmitReceipt'
         headers = {
             'Content-Type': 'application/json',
-            "DeviceModelName": request.user.model_name,
-            "DeviceModelVersion": request.user.model_version,
+            "DeviceModelName": user.model_name,
+            "DeviceModelVersion": user.model_version,
         }
 
+        # Create submission log
+        receipt_data = request.data.get('receipt')
+        if receipt_data:
+            try:
+                receipt = Receipt.objects.get(id=receipt_data.get('id'))
+                submission_log = ReceiptSubmissionLog.objects.create(
+                    receipt=receipt,
+                    submission_status='PENDING'
+                )
+            except Receipt.DoesNotExist:
+                return Response({
+                    "detail": "Receipt not found",
+                    "error_code": "RECEIPT_NOT_FOUND"
+                }, status=status.HTTP_404_NOT_FOUND)
+
         try:
-            response = requests.post(url, json=request.data, cert=(cert_path, key_path), headers=headers, verify=True)
+            response = requests.post(url, json=request.data, cert=(cert_path, key_path), headers=headers, verify=True, timeout=30)
             response.raise_for_status()
-            return Response(response.json())
+            
+            # Update submission log on success
+            if receipt_data:
+                submission_log.submission_status = 'SUBMITTED'
+                submission_log.zimra_response = response.text
+                submission_log.zimra_receipt_number = response.json().get('receiptNumber', '')
+                submission_log.save()
+            
+            return Response({
+                "success": True,
+                "zimra_response": response.json(),
+                "submission_id": submission_log.id if receipt_data else None
+            })
+            
+        except requests.exceptions.Timeout:
+            if receipt_data:
+                submission_log.submission_status = 'FAILED'
+                submission_log.error_message = 'Request timeout - ZIMRA server did not respond'
+                submission_log.save()
+            return Response({
+                "detail": "Request timeout. ZIMRA server is not responding. Please try again later.",
+                "error_code": "TIMEOUT"
+            }, status=status.HTTP_504_GATEWAY_TIMEOUT)
+            
+        except requests.exceptions.ConnectionError:
+            if receipt_data:
+                submission_log.submission_status = 'RETRY'
+                submission_log.error_message = 'Connection error - network issues'
+                submission_log.save()
+            return Response({
+                "detail": "Network connection error. Please check your internet connection and try again.",
+                "error_code": "CONNECTION_ERROR"
+            }, status=status.HTTP_503_SERVICE_UNAVAILABLE)
+            
+        except requests.exceptions.HTTPError as e:
+            error_msg = f"ZIMRA server error: {e.response.status_code}"
+            if receipt_data:
+                submission_log.submission_status = 'FAILED'
+                submission_log.error_message = error_msg
+                submission_log.zimra_response = e.response.text if hasattr(e.response, 'text') else ''
+                submission_log.save()
+            return Response({
+                "detail": error_msg,
+                "zimra_response": e.response.text if hasattr(e.response, 'text') else '',
+                "error_code": "ZIMRA_SERVER_ERROR"
+            }, status=status.HTTP_502_BAD_GATEWAY)
+            
         except requests.exceptions.RequestException as e:
-            return Response({"detail": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            if receipt_data:
+                submission_log.submission_status = 'FAILED'
+                submission_log.error_message = str(e)
+                submission_log.save()
+            return Response({
+                "detail": f"Request failed: {str(e)}",
+                "error_code": "REQUEST_FAILED"
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 class BuyerViewSet(viewsets.ModelViewSet):
     queryset = Buyer.objects.all()
@@ -604,6 +687,30 @@ def close_fiscal_day(request):
 def profile(request):
     """User profile view"""
     return render(request, 'main/profile.html')
+
+@login_required
+def zimra_dashboard(request):
+    """ZIMRA compliance dashboard"""
+    if not request.user.is_superuser:
+        return redirect('home')
+    
+    # Get submission statistics
+    stats = ReceiptSubmissionLog.objects.aggregate(
+        submitted=Count('id', filter=Q(submission_status='SUBMITTED')),
+        pending=Count('id', filter=Q(submission_status='PENDING')),
+        failed=Count('id', filter=Q(submission_status='FAILED')),
+        retry=Count('id', filter=Q(submission_status='RETRY'))
+    )
+    
+    # Get recent submission logs
+    recent_logs = ReceiptSubmissionLog.objects.select_related('receipt').order_by('-submission_timestamp')[:20]
+    
+    context = {
+        'stats': stats,
+        'recent_logs': recent_logs
+    }
+    
+    return render(request, 'main/zimra_dashboard.html', context)
 
 @login_required
 def change_password_view(request):

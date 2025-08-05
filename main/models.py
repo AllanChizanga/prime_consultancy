@@ -3,6 +3,10 @@ from django.db.models import F, ExpressionWrapper
 from django.contrib.auth.models import UserManager, AbstractBaseUser, PermissionsMixin
 import datetime
 from django.utils import timezone
+import hashlib
+import json
+import os
+from django.conf import settings
 
 
 current_date = datetime.date.today()
@@ -191,7 +195,48 @@ class Receipt(models.Model):
             self.invoice_number = self.generate_invoice_number()
             last_receipt = Receipt.objects.order_by('-global_number').first()
             self.global_number = last_receipt.global_number + 1 if last_receipt else 1
+            
+        # Generate ZIMRA-compliant hash
+        if not self.hash_val:
+            self.hash_val = self.generate_zimra_hash()
+            
         super().save(*args, **kwargs)
+
+    def generate_zimra_hash(self):
+        """Generate ZIMRA-compliant receipt hash for fiscal compliance"""
+        # Create hash data including all receipt information
+        hash_data = {
+            'global_number': self.global_number,
+            'counter': self.counter,
+            'invoice_number': self.invoice_number,
+            'date': self.date.isoformat() if self.date else '',
+            'total': str(self.total),
+            'currency': self.currency,
+            'receipt_type': self.receipt_type,
+            'tax_inclusive': self.tax_inclusive,
+            'payment_amount': self.paymentPaymentAmount,
+            'payment_type': self.payment_moneyTypeCode,
+        }
+        
+        # Add buyer information if available
+        if self.buyer:
+            hash_data.update({
+                'buyer_tin': self.buyer.tin or '',
+                'buyer_name': self.buyer.trade_name or self.buyer.reg_name or '',
+                'buyer_vat': self.buyer.vat_number or ''
+            })
+        
+        # Create deterministic JSON string
+        hash_string = json.dumps(hash_data, sort_keys=True, separators=(',', ':'))
+        
+        # Generate SHA-256 hash
+        return hashlib.sha256(hash_string.encode('utf-8')).hexdigest()
+
+    def verify_hash(self):
+        """Verify the receipt hash for integrity checking"""
+        current_hash = self.hash_val
+        calculated_hash = self.generate_zimra_hash()
+        return current_hash == calculated_hash
 
     def generate_invoice_number(self):
         prefix = "INV"
@@ -205,3 +250,26 @@ class Receipt(models.Model):
 
     def __str__(self):
         return f"{self.invoice_number} - {self.receipt_type} (${self.total})"
+
+class ReceiptSubmissionLog(models.Model):
+    """Track ZIMRA submission status for compliance monitoring"""
+    SUBMISSION_STATUS_CHOICES = [
+        ('PENDING', 'Pending Submission'),
+        ('SUBMITTED', 'Successfully Submitted'),
+        ('FAILED', 'Submission Failed'),
+        ('RETRY', 'Queued for Retry'),
+    ]
+    
+    receipt = models.ForeignKey(Receipt, on_delete=models.CASCADE, related_name='submission_logs')
+    submission_status = models.CharField(max_length=20, choices=SUBMISSION_STATUS_CHOICES, default='PENDING')
+    zimra_response = models.TextField(blank=True, null=True)
+    submission_timestamp = models.DateTimeField(auto_now_add=True)
+    retry_count = models.IntegerField(default=0)
+    error_message = models.TextField(blank=True, null=True)
+    zimra_receipt_number = models.CharField(max_length=255, blank=True, null=True)
+    
+    def __str__(self):
+        return f"{self.receipt.invoice_number} - {self.submission_status}"
+    
+    class Meta:
+        ordering = ['-submission_timestamp']

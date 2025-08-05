@@ -33,6 +33,7 @@ urlpatterns = [
     path('submit-invoice/', views.submit_invoice_view, name='submit_invoice'),
     path('open-fiscal-day/', views.open_fiscal_day, name='open_fiscal_day'),
     path('close-fiscal-day/', views.close_fiscal_day, name='close_fiscal_day'),
+    path('zimra-dashboard/', views.zimra_dashboard, name='zimra_dashboard'),
     path('profile/', views.profile, name='profile'),
     path('change-password/', views.change_password_view, name='change_password'),
     path('logout/', views.logout_view, name='logout'),
