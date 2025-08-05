@@ -16,7 +16,7 @@ from .models import User, FiscalDay, Receipt, ReceiptLine, ReceiptTax, Buyer, Cr
 from .serializers import (
     UserSerializer, FiscalDaySerializer, ReceiptSerializer, 
     ReceiptLineSerializer, ReceiptTaxSerializer, BuyerSerializer,
-    CreditDebitNoteSerializer, CsrSerializer
+    CreditDebitNoteSerializer, CsrSerializer, ReceiptSubmissionLogSerializer
 )
 import re
 import textwrap
@@ -601,11 +601,64 @@ def registered_clients(request):
 
 @login_required
 def device_status(request, user_id):
-    """Device status view"""
+    """Device status view - shows complete device and compliance information"""
     user = get_object_or_404(User, pk=user_id)
     if not request.user.is_superuser and request.user != user:
         return redirect('home')
-    return render(request, 'main/clientInfo.html', {'user': user})
+    
+    # Check certificate status
+    cert_path = os.path.join(settings.BASE_DIR, 'certificates', f'device_cert_{user.id}.pem')
+    key_path = os.path.join(settings.BASE_DIR, 'certificates', 'private.key')
+    
+    cert_status = {
+        'certificate_exists': os.path.exists(cert_path),
+        'private_key_exists': os.path.exists(key_path),
+        'cert_path': cert_path,
+        'key_path': key_path
+    }
+    
+    # Get recent receipts for this user
+    recent_receipts = Receipt.objects.filter(
+        # Note: We'll need to add user relationship to Receipt model
+        # For now, we'll show all recent receipts
+    ).order_by('-created_at')[:10]
+    
+    # Get submission statistics
+    submission_stats = ReceiptSubmissionLog.objects.aggregate(
+        total_submitted=Count('id', filter=Q(submission_status='SUBMITTED')),
+        total_failed=Count('id', filter=Q(submission_status='FAILED')),
+        total_pending=Count('id', filter=Q(submission_status='PENDING')),
+        total_retry=Count('id', filter=Q(submission_status='RETRY'))
+    )
+    
+    # Get recent submission logs
+    recent_submissions = ReceiptSubmissionLog.objects.select_related('receipt').order_by('-submission_timestamp')[:5]
+    
+    # Device configuration status
+    device_config = {
+        'device_id_set': bool(user.device_id),
+        'model_name_set': bool(user.model_name),
+        'model_version_set': bool(user.model_version),
+        'is_fully_configured': bool(user.device_id and user.model_name and user.model_version)
+    }
+    
+    # Check ZIMRA connection (we'll add this functionality)
+    zimra_status = {
+        'last_connection': None,  # Will implement
+        'connection_status': 'Unknown'  # Will implement
+    }
+    
+    context = {
+        'user': user,
+        'cert_status': cert_status,
+        'recent_receipts': recent_receipts,
+        'submission_stats': submission_stats,
+        'recent_submissions': recent_submissions,
+        'device_config': device_config,
+        'zimra_status': zimra_status
+    }
+    
+    return render(request, 'main/clientInfo.html', context)
 
 @login_required
 def client_activation(request, user_id):

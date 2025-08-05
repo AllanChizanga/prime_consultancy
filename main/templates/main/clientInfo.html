@@ -1,143 +1,307 @@
-{% extends 'main/MainLayout.html' %} {% load static %} {% block content %}
+{% extends 'main/MainLayout.html' %}
+{% load crispy_forms_tags %}
 
-<style>
-   {
-    box-sizing: border-box;
-  }
+{% block content %}
+<div class="container-fluid mt-4">
+  <div class="row">
+    <div class="col-12">
+      <!-- Header -->
+      <div class="d-flex justify-content-between align-items-center mb-4">
+        <h1 class="mb-0">
+          <i class="bi bi-router"></i> Device Status
+        </h1>
+        {% if request.user.is_superuser %}
+        <div class="btn-group">
+          {% if user.is_active %}
+            <a href="{% url 'client_deactivation' user.id %}" class="btn btn-warning">
+              <i class="bi bi-pause-circle"></i> Deactivate Client
+            </a>
+          {% else %}
+            <a href="{% url 'client_activation' user.id %}" class="btn btn-success">
+              <i class="bi bi-play-circle"></i> Activate Client
+            </a>
+          {% endif %}
+          <a href="{% url 'register_new_device' user.id %}" class="btn btn-primary">
+            <i class="bi bi-gear"></i> Configure Device
+          </a>
+        </div>
+        {% endif %}
+      </div>
 
-  /* Button used to open the contact form - fixed at the bottom of the page */
-  .open-button {
-    background-color: #555;
-    color: white;
-    padding: 16px 20px;
-    border: none;
-    cursor: pointer;
-    opacity: 0.8;
-    position: fixed;
-    bottom: 23px;
-    right: 28px;
-    width: 280px;
-  }
+      <!-- Client Information Card -->
+      <div class="row mb-4">
+        <div class="col-md-6">
+          <div class="card">
+            <div class="card-header">
+              <h5 class="mb-0"><i class="bi bi-building"></i> Client Information</h5>
+            </div>
+            <div class="card-body">
+              <table class="table table-borderless">
+                <tr>
+                  <td><strong>Company:</strong></td>
+                  <td>{{ user.company_name|default:"Not Set" }}</td>
+                </tr>
+                <tr>
+                  <td><strong>Contact:</strong></td>
+                  <td>{{ user.first_name }} {{ user.last_name }}</td>
+                </tr>
+                <tr>
+                  <td><strong>Email:</strong></td>
+                  <td>{{ user.email }}</td>
+                </tr>
+                <tr>
+                  <td><strong>Phone:</strong></td>
+                  <td>{{ user.phone_number|default:"Not Set" }}</td>
+                </tr>
+                <tr>
+                  <td><strong>Address:</strong></td>
+                  <td>{{ user.company_address|default:"Not Set" }}</td>
+                </tr>
+                <tr>
+                  <td><strong>Branch:</strong></td>
+                  <td>{{ user.company_branch|default:"Main" }}</td>
+                </tr>
+                <tr>
+                  <td><strong>Status:</strong></td>
+                  <td>
+                    {% if user.is_active %}
+                      <span class="badge bg-success">Active</span>
+                    {% else %}
+                      <span class="badge bg-danger">Inactive</span>
+                    {% endif %}
+                  </td>
+                </tr>
+                <tr>
+                  <td><strong>Joined:</strong></td>
+                  <td>{{ user.date_joined|date:"M d, Y" }}</td>
+                </tr>
+              </table>
+            </div>
+          </div>
+        </div>
 
-  /* The popup form - hidden by default */
-  .form-popup {
-    display: none;
-    position: fixed;
-    bottom: 0;
-    right: 15px;
-    border: 3px solid #f1f1f1;
-    z-index: 9;
-  }
+        <div class="col-md-6">
+          <div class="card">
+            <div class="card-header">
+              <h5 class="mb-0"><i class="bi bi-router"></i> Device Configuration</h5>
+            </div>
+            <div class="card-body">
+              <table class="table table-borderless">
+                <tr>
+                  <td><strong>Device ID:</strong></td>
+                  <td>
+                    {% if user.device_id %}
+                      <span class="badge bg-success">{{ user.device_id }}</span>
+                    {% else %}
+                      <span class="badge bg-warning">Not Configured</span>
+                    {% endif %}
+                  </td>
+                </tr>
+                <tr>
+                  <td><strong>Model Name:</strong></td>
+                  <td>{{ user.model_name|default:"Not Set" }}</td>
+                </tr>
+                <tr>
+                  <td><strong>Model Version:</strong></td>
+                  <td>{{ user.model_version|default:"Not Set" }}</td>
+                </tr>
+                <tr>
+                  <td><strong>Configuration Status:</strong></td>
+                  <td>
+                    {% if device_config.is_fully_configured %}
+                      <span class="badge bg-success">Complete</span>
+                    {% else %}
+                      <span class="badge bg-warning">Incomplete</span>
+                    {% endif %}
+                  </td>
+                </tr>
+              </table>
 
-  /* Add styles to the form container */
-  .form-container {
-    max-width: 300px;
-    padding: 10px;
-    background-color: white;
-  }
+              <!-- Configuration Progress -->
+              <div class="mt-3">
+                <h6>Setup Progress:</h6>
+                <div class="progress mb-2">
+                  {% if device_config.is_fully_configured %}
+                    <div class="progress-bar bg-success" style="width: 100%">100% Complete</div>
+                  {% else %}
+                    {% if device_config.device_id_set and device_config.model_name_set and device_config.model_version_set %}
+                      <div class="progress-bar bg-success" style="width: 100%">100% Complete</div>
+                    {% elif device_config.device_id_set and device_config.model_name_set %}
+                      <div class="progress-bar bg-warning" style="width: 67%">67% Complete</div>
+                    {% elif device_config.device_id_set or device_config.model_name_set or device_config.model_version_set %}
+                      <div class="progress-bar bg-warning" style="width: 33%">33% Complete</div>
+                    {% else %}
+                      <div class="progress-bar bg-danger" style="width: 10%">0% Complete</div>
+                    {% endif %}
+                  {% endif %}
+                </div>
+                <small class="text-muted">
+                  Device ID: {% if device_config.device_id_set %}✓{% else %}✗{% endif %} | 
+                  Model: {% if device_config.model_name_set %}✓{% else %}✗{% endif %} | 
+                  Version: {% if device_config.model_version_set %}✓{% else %}✗{% endif %}
+                </small>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
 
-  /* Full-width input fields */
-  .form-container input[type="text"],
-  .form-container input[type="password"] {
-    width: 100%;
-    padding: 15px;
-    margin: 5px 0 22px 0;
-    border: none;
-    background: #f1f1f1;
-  }
+      <!-- Certificate Status -->
+      <div class="row mb-4">
+        <div class="col-12">
+          <div class="card">
+            <div class="card-header">
+              <h5 class="mb-0"><i class="bi bi-shield-check"></i> Certificate Status</h5>
+            </div>
+            <div class="card-body">
+              <div class="row">
+                <div class="col-md-6">
+                  <div class="d-flex align-items-center mb-2">
+                    {% if cert_status.certificate_exists %}
+                      <i class="bi bi-check-circle-fill text-success me-2"></i>
+                      <span>Device Certificate: <strong>Installed</strong></span>
+                    {% else %}
+                      <i class="bi bi-x-circle-fill text-danger me-2"></i>
+                      <span>Device Certificate: <strong>Missing</strong></span>
+                    {% endif %}
+                  </div>
+                  <div class="d-flex align-items-center mb-2">
+                    {% if cert_status.private_key_exists %}
+                      <i class="bi bi-check-circle-fill text-success me-2"></i>
+                      <span>Private Key: <strong>Installed</strong></span>
+                    {% else %}
+                      <i class="bi bi-x-circle-fill text-danger me-2"></i>
+                      <span>Private Key: <strong>Missing</strong></span>
+                    {% endif %}
+                  </div>
+                </div>
+                <div class="col-md-6">
+                  {% if not cert_status.certificate_exists or not cert_status.private_key_exists %}
+                    <div class="alert alert-warning">
+                      <i class="bi bi-exclamation-triangle"></i>
+                      <strong>Action Required:</strong> Certificate setup incomplete. 
+                      <a href="{% url 'register_new_device' user.id %}" class="alert-link">Configure now</a>
+                    </div>
+                  {% else %}
+                    <div class="alert alert-success">
+                      <i class="bi bi-check-circle"></i>
+                      <strong>Ready:</strong> Device certificates are properly configured.
+                    </div>
+                  {% endif %}
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
 
-  /* When the inputs get focus, do something */
-  .form-container input[type="text"]:focus,
-  .form-container input[type="password"]:focus {
-    background-color: #ddd;
-    outline: none;
-  }
+      <!-- ZIMRA Submission Statistics -->
+      <div class="row mb-4">
+        <div class="col-md-3">
+          <div class="card bg-success text-white p-2">
+            <div class="card-body text-center">
+              <h3>{{ submission_stats.total_submitted|default:0 }}</h3>
+              <p class="mb-0 mt-2">Successful Submissions</p>
+            </div>
+          </div>
+        </div>
+        <div class="col-md-3">
+          <div class="card bg-warning text-white p-2">
+            <div class="card-body text-center">
+              <h3>{{ submission_stats.total_pending|default:0 }}</h3>
+              <p class="mb-0">Pending Submissions</p>
+            </div>
+          </div>
+        </div>
+        <div class="col-md-3">
+          <div class="card bg-danger text-white p-2">
+            <div class="card-body text-center">
+              <h3>{{ submission_stats.total_failed|default:0 }}</h3>
+              <p class="mb-0">Failed Submissions</p>
+            </div>
+          </div>
+        </div>
+        <div class="col-md-3">
+          <div class="card bg-info text-white p-2">
+            <div class="card-body text-center">
+              <h3>{{ submission_stats.total_retry|default:0 }}</h3>
+              <p class="mb-0">Retry Queue</p>
+            </div>
+          </div>
+        </div>
+      </div>
 
-  /* Set a style for the submit/login button */
-  .form-container .btn {
-    background-color: #04aa6d;
-    color: white;
-    padding: 16px 20px;
-    border: none;
-    cursor: pointer;
-    width: 100%;
-    margin-bottom: 10px;
-    opacity: 0.8;
-  }
+      <!-- Recent Submissions -->
+      <div class="row">
+        <div class="col-12">
+          <div class="card">
+            <div class="card-header d-flex justify-content-between align-items-center">
+              <h5 class="mb-0"><i class="bi bi-list-ul"></i> Recent ZIMRA Submissions</h5>
+              {% if request.user.is_superuser %}
+              <a href="{% url 'zimra_dashboard' %}" class="btn btn-sm btn-outline-primary">
+                <i class="bi bi-graph-up"></i> Full Dashboard
+              </a>
+              {% endif %}
+            </div>
+            <div class="card-body">
+              {% if recent_submissions %}
+              <div class="table-responsive">
+                <table class="table table-hover">
+                  <thead>
+                    <tr>
+                      <th>Receipt #</th>
+                      <th>Amount</th>
+                      <th>Submission Time</th>
+                      <th>Status</th>
+                      <th>ZIMRA Response</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {% for log in recent_submissions %}
+                    <tr>
+                      <td><strong>{{ log.receipt.invoice_number }}</strong></td>
+                      <td>${{ log.receipt.total }}</td>
+                      <td>{{ log.submission_timestamp|date:"M d, Y H:i" }}</td>
+                      <td>
+                        {% if log.submission_status == 'SUBMITTED' %}
+                          <span class="badge bg-success">{{ log.submission_status }}</span>
+                        {% elif log.submission_status == 'PENDING' %}
+                          <span class="badge bg-warning">{{ log.submission_status }}</span>
+                        {% elif log.submission_status == 'FAILED' %}
+                          <span class="badge bg-danger">{{ log.submission_status }}</span>
+                        {% elif log.submission_status == 'RETRY' %}
+                          <span class="badge bg-info">{{ log.submission_status }}</span>
+                        {% endif %}
+                      </td>
+                      <td>
+                        {% if log.zimra_receipt_number %}
+                          <small>{{ log.zimra_receipt_number }}</small>
+                        {% elif log.error_message %}
+                          <small class="text-danger">{{ log.error_message|truncatechars:30 }}</small>
+                        {% else %}
+                          <small class="text-muted">-</small>
+                        {% endif %}
+                      </td>
+                    </tr>
+                    {% endfor %}
+                  </tbody>
+                </table>
+              </div>
+              {% else %}
+              <div class="text-center py-4">
+                <i class="bi bi-inbox" style="font-size: 3rem; color: #dee2e6;"></i>
+                <p class="text-muted mt-2">No ZIMRA submissions yet</p>
+                <a href="{% url 'submit_invoice' %}" class="btn btn-primary">
+                  <i class="bi bi-plus-circle"></i> Create First Receipt
+                </a>
+              </div>
+              {% endif %}
+            </div>
+          </div>
+        </div>
+      </div>
 
-  /* Add a red background color to the cancel button */
-  .form-container .cancel {
-    background-color: red;
-  }
-
-  /* Add some hover effects to buttons */
-  .form-container .btn:hover,
-  .open-button:hover {
-    opacity: 1;
-  }
-</style>
-
-<div style="background-color: rgb(199, 205, 209)" class="pagetitle card p-3">
-  <h1>Dashboard</h1>
-  <nav>
-    <ol class="breadcrumb">
-      <li class="breadcrumb-item"><a href="">Home</a></li>
-      <li class="breadcrumb-item active">Dashboard</li>
-    </ol>
-  </nav>
-  <h1>Welcome to Client Information page</h1>
-  <br />
-  <p>
-    Company Name: {{user.company_name}}
-    <br>
-    Company Branch: {{user.company_branch}}
-    <br />
-    <br />
-    {% if user.is_active == True %}
-    <a href="{% url 'client_deactivation' user.id %}">
-      <button type="button" class="btn btn-danger">Deactivate</button>
-    </a>
-
-    <a href="{% url 'register_new_device' user.id %}">
-      <button
-        type="button"
-        class="btn btn-primary"
-  
-      >
-        Register New Device
-      </button>
-    </a>
-
-    
-
-    <a href="{% url 'device_config' user.id %}">
-      <button
-        type="button"
-        class="btn btn-primary"
-  
-      >
-        Get Device Configs
-      </button>
-    </a>
-
-    {% else %}
-    <a href="{% url 'client_activation' user.id %}">
-      <button type="button" class="btn btn-success">Activate</button>
-    </a>
-    {% endif %}
-  </p>
-
-  <!-- Modal -->
-  <div
-    class="modal fade"
-    id="exampleModal"
-    tabindex="-1"
-    aria-labelledby="exampleModalLabel"
-    aria-hidden="true"
-  >
+    </div>
   </div>
-
-  <!-- Button trigger modal -->
-
-  {% endblock content %}
 </div>
+{% endblock content %}

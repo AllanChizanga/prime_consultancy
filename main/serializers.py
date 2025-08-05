@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import User, FiscalDay, Receipt, ReceiptLine, ReceiptTax, Buyer, CreditDebitNote, Csr
+from .models import User, FiscalDay, Receipt, ReceiptLine, ReceiptTax, Buyer, CreditDebitNote, Csr, ReceiptSubmissionLog
 
 class UserSerializer(serializers.ModelSerializer):
     class Meta:
@@ -63,3 +63,13 @@ class CsrSerializer(serializers.ModelSerializer):
     class Meta:
         model = Csr
         fields = '__all__'
+
+class ReceiptSubmissionLogSerializer(serializers.ModelSerializer):
+    receipt = ReceiptSerializer(read_only=True)
+    
+    class Meta:
+        model = ReceiptSubmissionLog
+        fields = ['id', 'receipt', 'submission_status', 'zimra_response', 
+                 'submission_timestamp', 'retry_count', 'error_message', 
+                 'zimra_receipt_number']
+        read_only_fields = ['submission_timestamp']
