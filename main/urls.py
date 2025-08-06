@@ -22,13 +22,13 @@ urlpatterns = [
     path('', views.home, name='home'),
     path('admin-dashboard/', views.admin_dashboard, name='admin_dashboard'),
     path('registered-clients/', views.registered_clients, name='registered_clients'),
-    path('device-status/<int:user_id>/', views.device_status, name='device_status'),
-    path('client-info/<int:user_id>/', views.device_status, name='client_info'),
-    path('client-activation/<int:user_id>/', views.client_activation, name='client_activation'),
-    path('client-deactivation/<int:user_id>/', views.client_deactivation, name='client_deactivation'),
-    path('register-new-device/<int:user_id>/', views.register_new_device, name='register_new_device'),
-    path('device-config/<int:user_id>/', views.device_config, name='device_config'),
-    path('confirm-device-reg/<int:user_id>/', views.confirm_device_reg, name='confirm_device_reg'),
+    path('device-status/<uuid:user_id>/', views.device_status, name='device_status'),
+    path('client-info/<uuid:user_id>/', views.device_status, name='client_info'),
+    path('client-activation/<uuid:user_id>/', views.client_activation, name='client_activation'),
+    path('client-deactivation/<uuid:user_id>/', views.client_deactivation, name='client_deactivation'),
+    path('register-new-device/<uuid:user_id>/', views.register_new_device, name='register_new_device'),
+    path('device-config/<uuid:user_id>/', views.device_config, name='device_config'),
+    path('confirm-device-reg/<uuid:user_id>/', views.confirm_device_reg, name='confirm_device_reg'),
     path('submit-receipt/', views.submit_receipt_view, name='submit_receipt'),
     path('submit-invoice/', views.submit_invoice_view, name='submit_invoice'),
     path('open-fiscal-day/', views.open_fiscal_day, name='open_fiscal_day'),
@@ -37,6 +37,11 @@ urlpatterns = [
     path('profile/', views.profile, name='profile'),
     path('change-password/', views.change_password_view, name='change_password'),
     path('logout/', views.logout_view, name='logout'),
+    
+    # Legacy URL redirects for old integer IDs (backward compatibility)
+    path('device-status/<int:old_user_id>/', views.legacy_device_status_redirect, name='legacy_device_status'),
+    path('device-config/<int:old_user_id>/', views.legacy_device_config_redirect, name='legacy_device_config'),
+    path('client-info/<int:old_user_id>/', views.legacy_client_info_redirect, name='legacy_client_info'),
     
     # API URLs
     path('api/', include(router.urls)),

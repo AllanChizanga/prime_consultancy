@@ -26,12 +26,12 @@
           <span>Registered Clients</span>
         </a>
         {% else %}
-        <a class="nav-link collapsed" href="{% url 'device_status' request.user.id %}" data-page="device_status">
+        <a class="nav-link collapsed" href="{% url 'device_status' request.user.uuid %}" data-page="device_status">
           <i class="bi bi-hdd-stack"></i>
           <span>Device Status</span>
         </a>
 
-        <a class="nav-link collapsed mt-1" href="{% url 'device_config' request.user.id %}" data-page="device_config">
+        <a class="nav-link collapsed mt-1" href="{% url 'device_config' request.user.uuid %}" data-page="device_config">
           <i class="bi bi-gear"></i>
           <span>Device Config</span>
         </a>

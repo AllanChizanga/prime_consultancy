@@ -12,10 +12,27 @@
 </div>
 
 <div class="container-fluid">
-  <div class="row">
+  
+  <!-- Messages Display -->
+  {% if messages %}
+  <div class="row mb-3">
     <div class="col-12">
+      {% for message in messages %}
+      <div class="alert alert-{{ message.tags }} alert-dismissible fade show" role="alert">
+        <i class="bi bi-{% if message.tags == 'success' %}check-circle{% elif message.tags == 'error' %}exclamation-triangle{% elif message.tags == 'warning' %}exclamation-triangle{% else %}info-circle{% endif %}"></i>
+        {{ message }}
+        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+  {% endif %}
+  
+  <div class="row">
+    <!-- Main Form Column -->
+    <div class="col-lg-8">
       
-      <form method="post">
+      <form method="post" id="invoiceForm">
         {% csrf_token %}
         
         <!-- Buyer Information Card -->
@@ -28,9 +45,6 @@
               {% for field in buyer_form.visible_fields %}
                 <div class="col-md-6 col-lg-4 mb-3">
                   {{ field|as_crispy_field }}
-                  {% if field.help_text %}
-                    <small class="form-text text-muted">{{ field.help_text }}</small>
-                  {% endif %}
                 </div>
               {% endfor %}
             </div>
@@ -47,9 +61,6 @@
               {% for field in receipt_form.visible_fields %}
                 <div class="col-md-6 col-lg-4 mb-3">
                   {{ field|as_crispy_field }}
-                  {% if field.help_text %}
-                    <small class="form-text text-muted">{{ field.help_text }}</small>
-                  {% endif %}
                 </div>
               {% endfor %}
             </div>
@@ -95,12 +106,45 @@
             <div id="receipt-taxes-container">
               {% for form in tax_formset %}
                 <div class="receipt-tax border rounded p-3 mb-3 bg-light">
-                  <div class="row">
-                    {% for field in form.visible_fields %}
-                      <div class="col-md-6 col-lg-2 mb-2">
-                        {{ field|as_crispy_field }}
-                      </div>
-                    {% endfor %}
+                  <div class="row align-items-end">
+                    <div class="col-md-6 col-lg-3 mb-2">
+                      {% for field in form.visible_fields %}
+                        {% if field.name == 'taxCode' %}
+                          {{ field|as_crispy_field }}
+                        {% endif %}
+                      {% endfor %}
+                    </div>
+                    <div class="col-md-6 col-lg-2 mb-2">
+                      {% for field in form.visible_fields %}
+                        {% if field.name == 'taxPercent' %}
+                          {{ field|as_crispy_field }}
+                        {% endif %}
+                      {% endfor %}
+                    </div>
+                    <div class="col-md-6 col-lg-2 mb-2">
+                      {% for field in form.visible_fields %}
+                        {% if field.name == 'taxAmount' %}
+                          {{ field|as_crispy_field }}
+                        {% endif %}
+                      {% endfor %}
+                    </div>
+                    <div class="col-md-6 col-lg-3 mb-2">
+                      {% for field in form.visible_fields %}
+                        {% if field.name == 'salesAmountWithTax' %}
+                          {{ field|as_crispy_field }}
+                        {% endif %}
+                      {% endfor %}
+                    </div>
+                    <div class="col-md-6 col-lg-2 mb-2">
+                      {% for field in form.visible_fields %}
+                        {% if field.name == 'taxID' %}
+                          {{ field|as_crispy_field }}
+                        {% endif %}
+                      {% endfor %}
+                      <button type="button" class="btn btn-danger btn-sm mt-2 w-100" onclick="removeReceiptTax(this)">
+                        <i class="bi bi-trash"></i> Remove
+                      </button>
+                    </div>
                   </div>
                 </div>
               {% endfor %}
@@ -114,15 +158,97 @@
             <button type="submit" class="btn btn-success btn-lg px-5 py-3">
               <i class="bi bi-check-circle me-2"></i> Submit Invoice
             </button>
+            <button type="button" class="btn btn-outline-secondary btn-lg px-5 py-3 ms-3" onclick="resetForm()">
+              <i class="bi bi-arrow-clockwise me-2"></i> Reset Form
+            </button>
           </div>
         </div>
         
       </form>
     </div>
+    
+    <!-- Sidebar Column -->
+    <div class="col-lg-4">
+      
+      <!-- Form Summary Card -->
+      <div class="card mb-4">
+        <div class="card-header">
+          <h5 class="card-title mb-0"><i class="bi bi-clipboard-data"></i> Invoice Summary</h5>
+        </div>
+        <div class="card-body">
+          <div class="row">
+            <div class="col-6">
+              <div class="text-center">
+                <h6 class="text-muted">Lines</h6>
+                <span class="h4 text-primary" id="lineCount">0</span>
+              </div>
+            </div>
+            <div class="col-6">
+              <div class="text-center">
+                <h6 class="text-muted">Est. Total</h6>
+                <span class="h4 text-success" id="estimatedTotal">$0.00</span>
+              </div>
+            </div>
+          </div>
+          <hr>
+          <div class="d-grid">
+            <button type="button" class="btn btn-outline-primary btn-sm" onclick="calculateTotals()">
+              <i class="bi bi-calculator"></i> Calculate Total
+            </button>
+          </div>
+        </div>
+      </div>
+      
+      {% if recent_receipts %}
+      <!-- Recent Receipts Card -->
+      <div class="card mb-4">
+        <div class="card-header">
+          <h5 class="card-title mb-0"><i class="bi bi-clock-history"></i> Recent Receipts</h5>
+        </div>
+        <div class="card-body">
+          {% for receipt in recent_receipts %}
+          <div class="d-flex justify-content-between align-items-center py-2 border-bottom">
+            <div>
+              <strong>#{{ receipt.receipt_number }}</strong><br>
+              <small class="text-muted">{{ receipt.created_at|date:"M d, Y" }}</small>
+            </div>
+            <div class="text-end">
+              <span class="badge bg-{% if receipt.total %}success{% else %}secondary{% endif %}">
+                ${{ receipt.total|default:"0.00" }}
+              </span>
+            </div>
+          </div>
+          {% endfor %}
+          <div class="mt-3">
+            <a href="{% url 'home' %}" class="btn btn-outline-primary btn-sm w-100">
+              <i class="bi bi-list"></i> View All Receipts
+            </a>
+          </div>
+        </div>
+      </div>
+      {% endif %}
+      
+      <!-- Help Card -->
+      <div class="card">
+        <div class="card-header">
+          <h5 class="card-title mb-0"><i class="bi bi-question-circle"></i> Quick Help</h5>
+        </div>
+        <div class="card-body">
+          <ul class="list-unstyled small">
+            <li><i class="bi bi-check-circle text-success"></i> Buyer information is optional</li>
+            <li><i class="bi bi-check-circle text-success"></i> Add multiple receipt lines for different items</li>
+            <li><i class="bi bi-check-circle text-success"></i> Tax is calculated automatically if you enter percentages</li>
+            <li><i class="bi bi-check-circle text-success"></i> Receipt numbers are auto-generated if left blank</li>
+          </ul>
+        </div>
+      </div>
+      
+    </div>
   </div>
 </div>
 
 <script>
+  // Form management functions
   function addReceiptLine() {
       const container = document.getElementById("receipt-lines-container");
       const totalForms = document.getElementById("id_line_formset-TOTAL_FORMS");
@@ -145,25 +271,25 @@
             <div class="col-md-6 col-lg-2 mb-2">
               <div class="form-group">
                 <label for="id_line_formset-${formCount}-line_name">Line Name:</label>
-                <input type="text" name="line_formset-${formCount}-line_name" id="id_line_formset-${formCount}-line_name" class="form-control">
+                <input type="text" name="line_formset-${formCount}-line_name" id="id_line_formset-${formCount}-line_name" class="form-control" placeholder="Item name">
               </div>
             </div>
             <div class="col-md-6 col-lg-2 mb-2">
               <div class="form-group">
                 <label for="id_line_formset-${formCount}-line_price">Price:</label>
-                <input type="number" step="0.01" name="line_formset-${formCount}-line_price" id="id_line_formset-${formCount}-line_price" class="form-control">
+                <input type="number" step="0.01" name="line_formset-${formCount}-line_price" id="id_line_formset-${formCount}-line_price" class="form-control" placeholder="0.00" onchange="calculateTotals()">
               </div>
             </div>
             <div class="col-md-6 col-lg-2 mb-2">
               <div class="form-group">
                 <label for="id_line_formset-${formCount}-line_quantity">Quantity:</label>
-                <input type="number" step="0.01" name="line_formset-${formCount}-line_quantity" id="id_line_formset-${formCount}-line_quantity" class="form-control">
+                <input type="number" step="0.01" name="line_formset-${formCount}-line_quantity" id="id_line_formset-${formCount}-line_quantity" class="form-control" placeholder="1" value="1" onchange="calculateTotals()">
               </div>
             </div>
             <div class="col-md-6 col-lg-2 mb-2">
               <div class="form-group">
                 <label for="id_line_formset-${formCount}-tax_percent">Tax %:</label>
-                <input type="number" step="0.01" name="line_formset-${formCount}-tax_percent" id="id_line_formset-${formCount}-tax_percent" class="form-control">
+                <input type="number" step="0.01" name="line_formset-${formCount}-tax_percent" id="id_line_formset-${formCount}-tax_percent" class="form-control" placeholder="0.00" onchange="calculateTotals()">
               </div>
             </div>
             <div class="col-md-6 col-lg-2 mb-2">
@@ -177,6 +303,8 @@
 
       container.insertAdjacentHTML('beforeend', newFormHTML);
       totalForms.value = formCount + 1;
+      updateLineCount();
+      calculateTotals();
   }
 
   function addReceiptTax() {
@@ -186,27 +314,37 @@
 
       const newFormHTML = `
         <div class="receipt-tax border rounded p-3 mb-3 bg-light">
-          <div class="row">
-            <div class="col-md-6 col-lg-2 mb-2">
+          <div class="row align-items-end">
+            <div class="col-md-6 col-lg-3 mb-2">
               <div class="form-group">
                 <label for="id_tax_formset-${formCount}-taxCode">Tax Code:</label>
-                <input type="text" name="tax_formset-${formCount}-taxCode" id="id_tax_formset-${formCount}-taxCode" class="form-control">
+                <input type="text" name="tax_formset-${formCount}-taxCode" id="id_tax_formset-${formCount}-taxCode" class="form-control" placeholder="VAT">
               </div>
             </div>
             <div class="col-md-6 col-lg-2 mb-2">
               <div class="form-group">
                 <label for="id_tax_formset-${formCount}-taxPercent">Tax Percent:</label>
-                <input type="number" step="0.01" name="tax_formset-${formCount}-taxPercent" id="id_tax_formset-${formCount}-taxPercent" class="form-control">
+                <input type="number" step="0.01" name="tax_formset-${formCount}-taxPercent" id="id_tax_formset-${formCount}-taxPercent" class="form-control" placeholder="15.00" onchange="calculateTotals()">
               </div>
             </div>
             <div class="col-md-6 col-lg-2 mb-2">
               <div class="form-group">
                 <label for="id_tax_formset-${formCount}-taxAmount">Tax Amount:</label>
-                <input type="number" step="0.01" name="tax_formset-${formCount}-taxAmount" id="id_tax_formset-${formCount}-taxAmount" class="form-control">
+                <input type="number" step="0.01" name="tax_formset-${formCount}-taxAmount" id="id_tax_formset-${formCount}-taxAmount" class="form-control" placeholder="0.00" readonly>
+              </div>
+            </div>
+            <div class="col-md-6 col-lg-3 mb-2">
+              <div class="form-group">
+                <label for="id_tax_formset-${formCount}-salesAmountWithTax">Sales Amount With Tax:</label>
+                <input type="number" step="0.01" name="tax_formset-${formCount}-salesAmountWithTax" id="id_tax_formset-${formCount}-salesAmountWithTax" class="form-control" placeholder="0.00">
               </div>
             </div>
             <div class="col-md-6 col-lg-2 mb-2">
-              <button type="button" class="btn btn-danger btn-sm mt-4" onclick="removeReceiptTax(this)">
+              <div class="form-group">
+                <label for="id_tax_formset-${formCount}-taxID">Tax ID:</label>
+                <input type="text" name="tax_formset-${formCount}-taxID" id="id_tax_formset-${formCount}-taxID" class="form-control" placeholder="Tax ID">
+              </div>
+              <button type="button" class="btn btn-danger btn-sm mt-2 w-100" onclick="removeReceiptTax(this)">
                 <i class="bi bi-trash"></i> Remove
               </button>
             </div>
@@ -225,6 +363,9 @@
       // Update total forms count
       const totalForms = document.getElementById("id_line_formset-TOTAL_FORMS");
       totalForms.value = parseInt(totalForms.value) - 1;
+      
+      updateLineCount();
+      calculateTotals();
   }
 
   function removeReceiptTax(button) {
@@ -234,6 +375,125 @@
       // Update total forms count
       const totalForms = document.getElementById("id_tax_formset-TOTAL_FORMS");
       totalForms.value = parseInt(totalForms.value) - 1;
+      
+      calculateTotals();
   }
+
+  // Calculation functions
+  function calculateTotals() {
+      let subtotal = 0;
+      let totalTax = 0;
+      
+      // Calculate line totals
+      const lines = document.querySelectorAll('.receipt-line');
+      lines.forEach(function(line) {
+          const price = parseFloat(line.querySelector('input[name*="line_price"]')?.value || 0);
+          const quantity = parseFloat(line.querySelector('input[name*="line_quantity"]')?.value || 1);
+          const taxPercent = parseFloat(line.querySelector('input[name*="tax_percent"]')?.value || 0);
+          
+          const lineTotal = price * quantity;
+          const lineTax = lineTotal * (taxPercent / 100);
+          
+          subtotal += lineTotal;
+          totalTax += lineTax;
+      });
+      
+      // Update tax amounts in tax forms
+      const taxes = document.querySelectorAll('.receipt-tax');
+      taxes.forEach(function(tax) {
+          const taxPercent = parseFloat(tax.querySelector('input[name*="taxPercent"]')?.value || 0);
+          const taxAmountField = tax.querySelector('input[name*="taxAmount"]');
+          
+          if (taxAmountField && taxPercent > 0) {
+              const taxAmount = subtotal * (taxPercent / 100);
+              taxAmountField.value = taxAmount.toFixed(2);
+              totalTax += taxAmount;
+          }
+      });
+      
+      // Update summary
+      const total = subtotal + totalTax;
+      document.getElementById('estimatedTotal').textContent = `$${total.toFixed(2)}`;
+  }
+
+  function updateLineCount() {
+      const lineCount = document.querySelectorAll('.receipt-line').length;
+      document.getElementById('lineCount').textContent = lineCount;
+  }
+
+  function resetForm() {
+      if (confirm('Are you sure you want to reset the entire form? This will clear all entered data.')) {
+          document.getElementById('invoiceForm').reset();
+          
+          // Remove all dynamically added lines except the first one
+          const lines = document.querySelectorAll('.receipt-line');
+          for (let i = 1; i < lines.length; i++) {
+              lines[i].remove();
+          }
+          
+          // Remove all dynamically added taxes except the first one
+          const taxes = document.querySelectorAll('.receipt-tax');
+          for (let i = 1; i < taxes.length; i++) {
+              taxes[i].remove();
+          }
+          
+          // Reset form counts
+          document.getElementById("id_line_formset-TOTAL_FORMS").value = "1";
+          document.getElementById("id_tax_formset-TOTAL_FORMS").value = "1";
+          
+          updateLineCount();
+          calculateTotals();
+      }
+  }
+
+  // Form validation
+  function validateForm() {
+      let isValid = true;
+      const errors = [];
+      
+      // Check if at least one line item exists
+      const lines = document.querySelectorAll('.receipt-line');
+      let hasValidLine = false;
+      
+      lines.forEach(function(line) {
+          const price = line.querySelector('input[name*="line_price"]')?.value;
+          const name = line.querySelector('input[name*="line_name"]')?.value;
+          
+          if (price && name) {
+              hasValidLine = true;
+          }
+      });
+      
+      if (!hasValidLine) {
+          errors.push('Please add at least one receipt line with price and name');
+          isValid = false;
+      }
+      
+      if (!isValid) {
+          alert('Please fix the following errors:\n' + errors.join('\n'));
+      }
+      
+      return isValid;
+  }
+
+  // Initialize page
+  document.addEventListener('DOMContentLoaded', function() {
+      updateLineCount();
+      calculateTotals();
+      
+      // Add event listeners for real-time calculation
+      document.addEventListener('input', function(e) {
+          if (e.target.matches('input[name*="line_price"], input[name*="line_quantity"], input[name*="tax_percent"], input[name*="taxPercent"]')) {
+              calculateTotals();
+          }
+      });
+      
+      // Form submission validation
+      document.getElementById('invoiceForm').addEventListener('submit', function(e) {
+          if (!validateForm()) {
+              e.preventDefault();
+          }
+      });
+  });
 </script>
 {% endblock content %}

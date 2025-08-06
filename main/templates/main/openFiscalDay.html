@@ -1,15 +1,184 @@
-{% extends 'main/MainLayout.html' %} {% load static %} {% block content %}
+{% extends 'main/MainLayout.html' %}
+{% load static %}
+{% load crispy_forms_tags %}
 
+{% block content %}
 <div class="pagetitle card p-3">
-  <h1>Dashboard</h1>
+  <h1>Open Fiscal Day</h1>
   <nav>
     <ol class="breadcrumb">
-      <li class="breadcrumb-item"><a href="">Home</a></li>
-      <li class="breadcrumb-item active">Close Fiscal Day</li>
+      <li class="breadcrumb-item"><a href="{% url 'home' %}">Home</a></li>
+      <li class="breadcrumb-item active">Open Fiscal Day</li>
     </ol>
   </nav>
-  <h1>Xero receipt submission page</h1>
 </div>
-<!-- End Page Title -->
+
+<div class="container-fluid">
+  <div class="row">
+    <!-- Current Status Card -->
+    <div class="col-lg-8">
+      <div class="card">
+        <div class="card-header">
+          <h5 class="card-title mb-0">
+            <i class="bi bi-calendar-check"></i> Fiscal Day Status
+          </h5>
+        </div>
+        <div class="card-body">
+          {% if is_fiscal_day_open %}
+            <div class="alert alert-success d-flex align-items-center" role="alert">
+              <i class="bi bi-check-circle-fill me-2"></i>
+              <div>
+                <strong>Fiscal Day is Currently Open</strong><br>
+                <small>
+                  Day #{{ current_fiscal_day.day_number }} opened on {{ current_fiscal_day.day_opened|date:"F d, Y" }} at {{ current_fiscal_day.day_opened|time:"g:i A" }}
+                  ({{ current_fiscal_day.day_opened|timesince }} ago)
+                </small>
+              </div>
+            </div>
+            
+            <div class="row">
+              <div class="col-md-6">
+                <div class="info-box">
+                  <h6><i class="bi bi-calendar3"></i> Current Fiscal Day</h6>
+                  <p class="mb-1"><strong>Day Number:</strong> {{ current_fiscal_day.day_number }}</p>
+                  <p class="mb-1"><strong>Opened:</strong> {{ current_fiscal_day.day_opened|date:"F d, Y" }} at {{ current_fiscal_day.day_opened|time:"g:i A" }}</p>
+                  <p class="mb-0"><strong>Duration:</strong> {{ current_fiscal_day.duration }} day{{ current_fiscal_day.duration|pluralize }}</p>
+                </div>
+              </div>
+              <div class="col-md-6">
+                <div class="info-box">
+                  <h6><i class="bi bi-receipt"></i> Today's Activity</h6>
+                  <p class="mb-1"><strong>Receipts Issued:</strong> <span class="badge bg-primary">0</span></p>
+                  <p class="mb-1"><strong>Total Sales:</strong> <span class="badge bg-success">$0.00</span></p>
+                  <p class="mb-0"><strong>Status:</strong> <span class="badge bg-success">Active</span></p>
+                </div>
+              </div>
+            </div>
+            
+            <div class="alert alert-info mt-3">
+              <i class="bi bi-info-circle"></i>
+              <strong>Note:</strong> You cannot open a new fiscal day while one is already active. 
+              Please close the current fiscal day before opening a new one.
+            </div>
+            
+          {% else %}
+            <div class="alert alert-warning d-flex align-items-center" role="alert">
+              <i class="bi bi-exclamation-triangle-fill me-2"></i>
+              <div>
+                <strong>No Fiscal Day is Currently Open</strong><br>
+                <small>You need to open a fiscal day before you can process any transactions.</small>
+              </div>
+            </div>
+            
+            <form method="post" class="mt-3">
+              {% csrf_token %}
+              <div class="d-grid gap-2 d-md-flex justify-content-md-start">
+                <button type="submit" class="btn btn-success btn-lg">
+                  <i class="bi bi-calendar-plus"></i> Open New Fiscal Day
+                </button>
+              </div>
+            </form>
+            
+            <div class="alert alert-info mt-3">
+              <i class="bi bi-info-circle"></i>
+              <strong>What happens when you open a fiscal day?</strong>
+              <ul class="mb-0 mt-2">
+                <li>A new fiscal period begins for processing transactions</li>
+                <li>Receipt numbering sequence starts fresh</li>
+                <li>Daily sales tracking is initialized</li>
+                <li>ZIMRA compliance reporting period begins</li>
+              </ul>
+            </div>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+    
+    <!-- Recent Fiscal Days -->
+    <div class="col-lg-4">
+      <div class="card">
+        <div class="card-header">
+          <h5 class="card-title mb-0">
+            <i class="bi bi-clock-history"></i> Recent Fiscal Days
+          </h5>
+        </div>
+        <div class="card-body">
+          {% if recent_fiscal_days %}
+            <div class="list-group list-group-flush">
+              {% for fiscal_day in recent_fiscal_days %}
+                <div class="list-group-item d-flex justify-content-between align-items-start">
+                  <div class="ms-2 me-auto">
+                    <div class="fw-bold">Day #{{ fiscal_day.day_number }}</div>
+                    <small class="text-muted">
+                      {{ fiscal_day.day_opened|date:"M d, Y" }} at {{ fiscal_day.day_opened|time:"g:i A" }}
+                      {% if fiscal_day.day_closed %}
+                        - {{ fiscal_day.day_closed|date:"M d, Y" }} at {{ fiscal_day.day_closed|time:"g:i A" }}
+                      {% endif %}
+                    </small>
+                  </div>
+                  {% if fiscal_day.is_open %}
+                    <span class="badge bg-success rounded-pill">Open</span>
+                  {% else %}
+                    <span class="badge bg-secondary rounded-pill">Closed</span>
+                  {% endif %}
+                </div>
+              {% endfor %}
+            </div>
+          {% else %}
+            <p class="text-muted text-center py-3">
+              <i class="bi bi-calendar-x"></i><br>
+              No fiscal days found
+            </p>
+          {% endif %}
+        </div>
+      </div>
+      
+      <!-- Quick Actions -->
+      <div class="card mt-3">
+        <div class="card-header">
+          <h5 class="card-title mb-0">
+            <i class="bi bi-lightning"></i> Quick Actions
+          </h5>
+        </div>
+        <div class="card-body">
+          <div class="d-grid gap-2">
+            <a href="{% url 'close_fiscal_day' %}" class="btn btn-outline-danger">
+              <i class="bi bi-calendar-x"></i> Close Fiscal Day
+            </a>
+            <a href="{% url 'submit_invoice' %}" class="btn btn-outline-primary">
+              <i class="bi bi-receipt"></i> Submit Invoice
+            </a>
+            <a href="{% url 'zimra_dashboard' %}" class="btn btn-outline-info">
+              <i class="bi bi-graph-up"></i> ZIMRA Dashboard
+            </a>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<style>
+.info-box {
+  background: #f8f9fa;
+  border-left: 4px solid #007bff;
+  padding: 15px;
+  border-radius: 0 5px 5px 0;
+}
+
+.info-box h6 {
+  color: #007bff;
+  margin-bottom: 10px;
+}
+
+.list-group-item {
+  border: none;
+  border-bottom: 1px solid #dee2e6;
+}
+
+.list-group-item:last-child {
+  border-bottom: none;
+}
+</style>
 
 {% endblock content %}

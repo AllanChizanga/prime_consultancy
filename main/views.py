@@ -8,6 +8,8 @@ from django.contrib.auth.forms import PasswordChangeForm
 from django.contrib import messages
 from django.conf import settings
 from django.db.models import Count, Q
+from django.forms import formset_factory
+from django.http import Http404
 import os
 import json
 import requests
@@ -15,11 +17,24 @@ from django.utils import timezone
 from rest_framework_simplejwt.tokens import RefreshToken
 import urllib3
 from .models import User, FiscalDay, Receipt, ReceiptLine, ReceiptTax, Buyer, CreditDebitNote, Csr, ReceiptSubmissionLog
+from .forms import BuyerForm, ReceiptForm, ReceiptLineForm, ReceiptTaxForm
 from .serializers import (
     UserSerializer, FiscalDaySerializer, ReceiptSerializer, 
     ReceiptLineSerializer, ReceiptTaxSerializer, BuyerSerializer,
     CreditDebitNoteSerializer, CsrSerializer, ReceiptSubmissionLogSerializer
 )
+
+# Helper function to get user by UUID
+def get_user_by_uuid(user_uuid):
+    """Get user by UUID, fallback to integer ID for backward compatibility"""
+    try:
+        return User.objects.get(uuid=user_uuid)
+    except (User.DoesNotExist, ValueError):
+        # If UUID lookup fails, might be an old integer ID
+        try:
+            return User.objects.get(id=int(user_uuid))
+        except (User.DoesNotExist, ValueError):
+            raise Http404("User not found")
 
 # Disable SSL warnings for test environment
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
@@ -608,7 +623,7 @@ def registered_clients(request):
 @login_required
 def device_status(request, user_id):
     """Device status view - shows complete device and compliance information"""
-    user = get_object_or_404(User, pk=user_id)
+    user = get_user_by_uuid(user_id)
     if not request.user.is_superuser and request.user != user:
         return redirect('home')
     
@@ -672,11 +687,11 @@ def client_activation(request, user_id):
     if not request.user.is_superuser:
         return redirect('home')
     
-    user = get_object_or_404(User, pk=user_id)
+    user = get_user_by_uuid(user_id)
     user.is_active = True
     user.save()
     
-    return redirect('client_info', user_id=user.id)
+    return redirect('client_info', user_id=user.uuid)
 
 @login_required
 def client_deactivation(request, user_id):
@@ -684,11 +699,11 @@ def client_deactivation(request, user_id):
     if not request.user.is_superuser:
         return redirect('home')
     
-    user = get_object_or_404(User, pk=user_id)
+    user = get_user_by_uuid(user_id)
     user.is_active = False
     user.save()
     
-    return redirect('client_info', user_id=user.id)
+    return redirect('client_info', user_id=user.uuid)
 
 @login_required
 def register_new_device(request, user_id):
@@ -696,13 +711,13 @@ def register_new_device(request, user_id):
     if not request.user.is_superuser:
         return redirect('home')
     
-    user = get_object_or_404(User, pk=user_id)
+    user = get_user_by_uuid(user_id)
     return render(request, 'main/deviceReg.html', {'client': user})
 
 @login_required
 def device_config(request, user_id):
     """Comprehensive Device Configuration Dashboard"""
-    user = get_object_or_404(User, pk=user_id)
+    user = get_user_by_uuid(user_id)
     if not request.user.is_superuser and request.user != user:
         return redirect('home')
     
@@ -832,11 +847,44 @@ def device_config(request, user_id):
             if context['certificate_status']['cert_exists']:
                 test_result = test_zimra_connectivity(user, cert_path, key_path)
                 if test_result.get('connection_status') == 'Connected':
-                    messages.success(request, 'ZIMRA connection test successful!')
+                    messages.success(request, f"✅ ZIMRA connection test successful! Connected to {test_result.get('successful_endpoint', 'ZIMRA API')} in {test_result.get('response_time', 0):.2f}s")
                 else:
-                    messages.error(request, f"Connection test failed: {test_result.get('error', 'Unknown error')}")
+                    # Provide detailed error information
+                    error_msg = f"❌ Connection test failed: {test_result.get('error', 'Unknown error')}"
+                    
+                    # Add recommendations if available
+                    if test_result.get('recommendations'):
+                        recommendations = test_result['recommendations'][:3]  # Show first 3 recommendations
+                        error_msg += f" | Suggestions: {', '.join(recommendations)}"
+                    
+                    # Show failed endpoints count if available
+                    all_results = test_result.get('all_results', {})
+                    failed_count = len(all_results.get('failed', []))
+                    if failed_count > 0:
+                        error_msg += f" | Tested {failed_count} endpoints"
+                    
+                    messages.error(request, error_msg)
             else:
-                messages.error(request, 'Cannot test connection: Certificates not found')
+                messages.error(request, '❌ Cannot test connection: Certificates not found. Please upload certificates first.')
+            return redirect('device_config', user_id=user.id)
+            
+        elif action == 'register_with_zimra':
+            # Register device with ZIMRA first
+            try:
+                cert_path = os.path.join(settings.BASE_DIR, 'certificates', f'device_cert_{user.id}.pem')
+                key_path = os.path.join(settings.BASE_DIR, 'private.key')
+                
+                registration_result = register_device_with_zimra(user, cert_path, key_path)
+                
+                if registration_result['registration_status'] == 'Success':
+                    messages.success(request, 'Device successfully registered with ZIMRA!')
+                    messages.info(request, f"Registration completed using endpoint: {registration_result.get('endpoint_used', 'Unknown')}")
+                else:
+                    messages.error(request, f"Registration failed: {registration_result.get('error', 'Unknown error')}")
+                    
+            except Exception as e:
+                messages.error(request, f"Registration error: {str(e)}")
+            
             return redirect('device_config', user_id=user.id)
             
         elif action == 'sync_with_zimra':
@@ -886,67 +934,361 @@ def calculate_setup_progress(user):
     return int((completed_steps / total_steps) * 100)
 
 def test_zimra_connectivity(user, cert_path, key_path):
-    """Test connectivity to ZIMRA API"""
+    """Test connectivity to ZIMRA API with proper authentication"""
     try:
-        url = f"https://fdmsapitest.zimra.co.zw/Device/v1/{user.device_id}/GetStatus"
+        # ZIMRA FDMS API Configuration
+        base_url = "https://fdmsapi.zimra.co.zw"  # Production URL
+        # For testing, use: https://fdmsapitest.zimra.co.zw
+        
+        # Read certificate to get device ID if not set
+        device_id = user.device_id or "TEST_DEVICE_001"
+        
+        # ZIMRA API requires specific headers
         headers = {
             "Content-Type": "application/json",
-            "DeviceModelName": user.model_name or "DefaultModel",
-            "DeviceModelVersion": user.model_version or "1.0"
+            "Accept": "application/json",
+            "DeviceModelName": user.model_name or "FISCAL_DEVICE",
+            "DeviceModelVersion": user.model_version or "1.0",
+            "DeviceSerialNumber": user.zimra_serial_number or device_id,
+            "ApplicationName": "PrimeConsultancy_FDMS",
+            "ApplicationVersion": "1.0",
+            "User-Agent": "PrimeConsultancy-FDMS/1.0"
         }
         
-        # Try alternative endpoints for better compatibility
-        urls_to_try = [
-            f"https://fdmsapitest.zimra.co.zw/Device/v1/{user.device_id}/GetStatus",
-            f"https://fdmsapitest.zimra.co.zw/Device/v1/{user.device_id}/GetConfiguration",
-            f"https://fdmsapitest.zimra.co.zw/api/v1/device/{user.device_id}/status"
+        # Check if certificates exist
+        if not os.path.exists(cert_path):
+            return {
+                'connection_status': 'Certificate Missing',
+                'last_test': timezone.now(),
+                'error': f"Certificate not found at: {cert_path}",
+                'response_time': None,
+                'recommendations': [
+                    "1. Generate or upload a valid certificate",
+                    "2. Ensure certificate is in PEM format",
+                    "3. Check file permissions"
+                ]
+            }
+            
+        if not os.path.exists(key_path):
+            return {
+                'connection_status': 'Private Key Missing',
+                'last_test': timezone.now(),
+                'error': f"Private key not found at: {key_path}",
+                'response_time': None,
+                'recommendations': [
+                    "1. Generate or upload a valid private key",
+                    "2. Ensure private key matches certificate",
+                    "3. Check file permissions"
+                ]
+            }
+        
+        # ZIMRA FDMS API Endpoints (based on official documentation)
+        endpoints_to_try = [
+            {
+                "url": f"{base_url}/ping",
+                "method": "GET",
+                "name": "Basic Connectivity Test"
+            },
+            {
+                "url": f"{base_url}/api/health",
+                "method": "GET",
+                "name": "API Health Check"
+            },
+            {
+                "url": f"{base_url}/Device/Status",
+                "method": "GET",
+                "name": "Device Status Check"
+            },
+            {
+                "url": f"{base_url}/Device/GetConfiguration",
+                "method": "GET", 
+                "name": "Get Device Configuration"
+            },
+            {
+                "url": f"{base_url}/Device/GetInfo",
+                "method": "GET",
+                "name": "Get Device Information"
+            }
         ]
         
-        last_response = None
-        for test_url in urls_to_try:
+        successful_connections = []
+        failed_connections = []
+        
+        for endpoint in endpoints_to_try:
             try:
-                response = requests.get(test_url, cert=(cert_path, key_path), headers=headers, verify=False, timeout=30)
-                last_response = response
+                print(f"Testing ZIMRA endpoint: {endpoint['name']} - {endpoint['url']}")
                 
-                print(f"Testing URL: {test_url}")
-                print(f"Status: {response.status_code}")
-                print(f"Response: {response.text[:200]}...")
+                # Configure SSL session
+                session = requests.Session()
                 
-                if response.status_code == 200:
+                # Load certificate and key
+                session.cert = (cert_path, key_path)
+                
+                # ZIMRA requires specific SSL configuration
+                session.verify = False  # For test environment
+                
+                start_time = timezone.now()
+                
+                # Make the API call
+                if endpoint['method'] == 'GET':
+                    response = session.get(
+                        endpoint['url'], 
+                        headers=headers, 
+                        timeout=30
+                    )
+                else:
+                    response = session.post(
+                        endpoint['url'], 
+                        headers=headers, 
+                        json={}, 
+                        timeout=30
+                    )
+                
+                response_time = (timezone.now() - start_time).total_seconds()
+                
+                print(f"Response Status: {response.status_code}")
+                print(f"Response Headers: {dict(response.headers)}")
+                print(f"Response Body: {response.text[:300]}...")
+                
+                if response.status_code in [200, 201, 202]:
+                    # Success
+                    try:
+                        response_data = response.json()
+                    except:
+                        response_data = {"raw_response": response.text}
+                    
+                    successful_connections.append({
+                        'endpoint': endpoint['name'],
+                        'url': endpoint['url'],
+                        'status_code': response.status_code,
+                        'response_time': response_time,
+                        'data': response_data
+                    })
+                    
+                    # Return on first successful connection
                     return {
                         'connection_status': 'Connected',
                         'last_test': timezone.now(),
-                        'response_time': response.elapsed.total_seconds(),
-                        'zimra_response': response.json(),
-                        'successful_url': test_url
+                        'successful_endpoint': endpoint['name'],
+                        'response_time': response_time,
+                        'zimra_response': response_data,
+                        'all_results': {
+                            'successful': successful_connections,
+                            'failed': failed_connections
+                        }
                     }
+                elif response.status_code == 401:
+                    # Authentication error - likely certificate or registration issue
+                    failed_connections.append({
+                        'endpoint': endpoint['name'],
+                        'url': endpoint['url'],
+                        'status_code': response.status_code,
+                        'error': "Authentication failed - device may not be registered",
+                        'response_time': response_time,
+                        'response_text': response.text
+                    })
+                elif response.status_code == 403:
+                    # Forbidden - certificate valid but access denied
+                    failed_connections.append({
+                        'endpoint': endpoint['name'],
+                        'url': endpoint['url'],
+                        'status_code': response.status_code,
+                        'error': "Access forbidden - certificate valid but permissions denied",
+                        'response_time': response_time,
+                        'response_text': response.text
+                    })
+                else:
+                    # Other HTTP errors
+                    failed_connections.append({
+                        'endpoint': endpoint['name'],
+                        'url': endpoint['url'],
+                        'status_code': response.status_code,
+                        'error': f"HTTP {response.status_code}: {response.text}",
+                        'response_time': response_time
+                    })
+                    
+            except requests.exceptions.SSLError as ssl_error:
+                print(f"SSL Error for {endpoint['name']}: {ssl_error}")
+                failed_connections.append({
+                    'endpoint': endpoint['name'],
+                    'url': endpoint['url'],
+                    'error': f"SSL Error: {ssl_error}",
+                    'error_type': 'SSL'
+                })
+                
+            except requests.exceptions.ConnectionError as conn_error:
+                print(f"Connection Error for {endpoint['name']}: {conn_error}")
+                failed_connections.append({
+                    'endpoint': endpoint['name'],
+                    'url': endpoint['url'],
+                    'error': f"Connection Error: {conn_error}",
+                    'error_type': 'Connection'
+                })
+                
+            except requests.exceptions.Timeout as timeout_error:
+                print(f"Timeout Error for {endpoint['name']}: {timeout_error}")
+                failed_connections.append({
+                    'endpoint': endpoint['name'],
+                    'url': endpoint['url'],
+                    'error': f"Timeout Error: {timeout_error}",
+                    'error_type': 'Timeout'
+                })
+                
             except Exception as e:
-                print(f"URL {test_url} failed: {e}")
+                print(f"Error for {endpoint['name']}: {e}")
+                failed_connections.append({
+                    'endpoint': endpoint['name'],
+                    'url': endpoint['url'],
+                    'error': str(e),
+                    'error_type': 'General'
+                })
+        
+        # If we get here, all endpoints failed
+        # Analyze failures to provide better recommendations
+        ssl_errors = [f for f in failed_connections if f.get('error_type') == 'SSL']
+        auth_errors = [f for f in failed_connections if '401' in str(f.get('status_code', ''))]
+        connection_errors = [f for f in failed_connections if f.get('error_type') == 'Connection']
+        
+        recommendations = []
+        if ssl_errors:
+            recommendations.extend([
+                "SSL Issues detected:",
+                "- Check if certificate and private key match",
+                "- Verify certificate is valid and not expired",
+                "- Ensure certificate is issued by ZIMRA"
+            ])
+        if auth_errors:
+            recommendations.extend([
+                "Authentication Issues detected:",
+                "- Register device with ZIMRA first",
+                "- Verify device ID matches registration",
+                "- Check if device is approved by ZIMRA"
+            ])
+        if connection_errors:
+            recommendations.extend([
+                "Connection Issues detected:",
+                "- Check internet connectivity",
+                "- Verify ZIMRA API URL is correct",
+                "- Try switching between test and production URLs"
+            ])
+        
+        return {
+            'connection_status': 'All Endpoints Failed',
+            'last_test': timezone.now(),
+            'error': "All ZIMRA API endpoints returned errors",
+            'all_results': {
+                'successful': successful_connections,
+                'failed': failed_connections
+            },
+            'recommendations': recommendations or [
+                "1. Check if your device is registered with ZIMRA",
+                "2. Verify certificate is valid and not expired", 
+                "3. Confirm device ID matches ZIMRA registration",
+                "4. Check if ZIMRA API base URL is correct",
+                "5. Ensure all required headers are present"
+            ]
+        }
+            
+    except Exception as e:
+        return {
+            'connection_status': 'Configuration Error',
+            'last_test': timezone.now(),
+            'error': f"Configuration error: {str(e)}",
+            'response_time': None,
+            'recommendations': [
+                "Check system configuration",
+                "Verify file permissions",
+                "Ensure all required dependencies are installed"
+            ]
+        }
+
+def register_device_with_zimra(user, cert_path, key_path):
+    """Register device with ZIMRA FDMS system"""
+    try:
+        base_url = "https://fdmsapi.zimra.co.zw"  # Production
+        # For testing: https://fdmsapitest.zimra.co.zw
+        
+        registration_data = {
+            "deviceId": user.device_id or f"DEVICE_{user.id}",
+            "deviceSerialNumber": user.zimra_serial_number or f"SN_{user.id}",
+            "deviceModelName": user.model_name or "FISCAL_DEVICE",
+            "deviceModelVersion": user.model_version or "1.0",
+            "companyName": user.company_name or "Prime Consultancy",
+            "companyTaxNumber": user.tax_number or "",
+            "contactEmail": user.email,
+            "contactPhone": user.phone_number or "",
+            "businessAddress": user.company_address or ""
+        }
+        
+        headers = {
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+            "DeviceModelName": registration_data["deviceModelName"],
+            "DeviceModelVersion": registration_data["deviceModelVersion"],
+            "DeviceSerialNumber": registration_data["deviceSerialNumber"],
+            "ApplicationName": "PrimeConsultancy_FDMS",
+            "ApplicationVersion": "1.0"
+        }
+        
+        session = requests.Session()
+        session.cert = (cert_path, key_path)
+        session.verify = False  # For test environment
+        
+        # Try device registration endpoints
+        registration_endpoints = [
+            f"{base_url}/Device/Register",
+            f"{base_url}/Device/Initialize", 
+            f"{base_url}/Registration/Device"
+        ]
+        
+        for endpoint in registration_endpoints:
+            try:
+                print(f"Attempting device registration at: {endpoint}")
+                
+                response = session.post(
+                    endpoint,
+                    json=registration_data,
+                    headers=headers,
+                    timeout=60
+                )
+                
+                print(f"Registration response: {response.status_code}")
+                print(f"Response: {response.text}")
+                
+                if response.status_code in [200, 201, 202]:
+                    response_data = response.json() if response.text else {}
+                    
+                    # Update user with registration info
+                    if 'deviceId' in response_data:
+                        user.device_id = response_data['deviceId']
+                    if 'registrationStatus' in response_data:
+                        user.zimra_registration_status = response_data['registrationStatus']
+                    
+                    user.zimra_last_sync = timezone.now()
+                    user.save()
+                    
+                    return {
+                        'registration_status': 'Success',
+                        'endpoint_used': endpoint,
+                        'zimra_response': response_data,
+                        'timestamp': timezone.now()
+                    }
+                    
+            except Exception as e:
+                print(f"Registration endpoint {endpoint} failed: {e}")
                 continue
         
-        # If we get here, all URLs failed
-        response = last_response
-        if response:
-            return {
-                'connection_status': 'Error',
-                'last_test': timezone.now(),
-                'error': f"HTTP {response.status_code}: {response.text}",
-                'response_time': response.elapsed.total_seconds()
-            }
-        else:
-            return {
-                'connection_status': 'Failed',
-                'last_test': timezone.now(),
-                'error': "All API endpoints failed",
-                'response_time': None
-            }
-            
-    except requests.exceptions.RequestException as e:
         return {
-            'connection_status': 'Failed',
-            'last_test': timezone.now(),
+            'registration_status': 'Failed',
+            'error': 'All registration endpoints failed',
+            'timestamp': timezone.now()
+        }
+        
+    except Exception as e:
+        return {
+            'registration_status': 'Error',
             'error': str(e),
-            'response_time': None
+            'timestamp': timezone.now()
         }
 
 def sync_device_with_zimra(user):
@@ -1047,7 +1389,7 @@ def confirm_device_reg(request, user_id):
     if not request.user.is_superuser:
         return redirect('home')
     
-    user = get_object_or_404(User, pk=user_id)
+    user = get_user_by_uuid(user_id)
     
     if request.method == 'POST':
         # Handle device registration confirmation logic here
@@ -1062,19 +1404,218 @@ def submit_receipt_view(request):
     return render(request, 'main/submitReceipt.html')
 
 @login_required
+@login_required
 def submit_invoice_view(request):
-    """Submit invoice view"""
-    return render(request, 'main/invoice.html')
+    """Submit invoice view with comprehensive form handling"""
+    
+    # Create formsets for receipt lines and taxes
+    ReceiptLineFormSet = formset_factory(ReceiptLineForm, extra=1, can_delete=True)
+    ReceiptTaxFormSet = formset_factory(ReceiptTaxForm, extra=1, can_delete=True)
+    
+    if request.method == 'POST':
+        # Initialize forms with POST data
+        buyer_form = BuyerForm(request.POST)
+        receipt_form = ReceiptForm(request.POST)
+        line_formset = ReceiptLineFormSet(request.POST, prefix='line_formset')
+        tax_formset = ReceiptTaxFormSet(request.POST, prefix='tax_formset')
+        
+        # Validate all forms
+        if (receipt_form.is_valid() and 
+            line_formset.is_valid() and 
+            tax_formset.is_valid()):
+            
+            try:
+                # Create buyer if provided
+                buyer = None
+                if buyer_form.is_valid() and any(buyer_form.cleaned_data.values()):
+                    buyer = buyer_form.save()
+                
+                # Create receipt
+                receipt = receipt_form.save(commit=False)
+                receipt.user = request.user
+                receipt.buyer = buyer
+                
+                # Auto-generate receipt number if not provided
+                if not receipt.invoice_number:
+                    last_receipt = Receipt.objects.filter(user=request.user).order_by('-id').first()
+                    if last_receipt and last_receipt.invoice_number:
+                        try:
+                            # Extract number from invoice number and increment
+                            import re
+                            numbers = re.findall(r'\d+', last_receipt.invoice_number)
+                            if numbers:
+                                last_num = int(numbers[-1])
+                                receipt.invoice_number = str(last_num + 1).zfill(6)
+                            else:
+                                receipt.invoice_number = "000001"
+                        except:
+                            receipt.invoice_number = "000001"
+                    else:
+                        receipt.invoice_number = "000001"
+                
+                # Calculate totals from line items
+                line_total = 0
+                tax_total = 0
+                
+                # Save receipt first to get ID
+                receipt.save()
+                
+                # Process receipt lines
+                line_number = 1
+                for line_form in line_formset:
+                    if line_form.cleaned_data and not line_form.cleaned_data.get('DELETE', False):
+                        line = line_form.save(commit=False)
+                        line.receipt = receipt
+                        line.line_number = line_number
+                        
+                        # Calculate line total
+                        line.line_total = (line.line_price or 0) * (line.line_quantity or 1)
+                        line_total += line.line_total
+                        
+                        # Calculate tax for line
+                        if line.tax_percent:
+                            line_tax = line.line_total * (line.tax_percent / 100)
+                            tax_total += line_tax
+                        
+                        line.save()
+                        line_number += 1
+                
+                # Process receipt taxes
+                for tax_form in tax_formset:
+                    if tax_form.cleaned_data and not tax_form.cleaned_data.get('DELETE', False):
+                        tax = tax_form.save(commit=False)
+                        tax.receipt = receipt
+                        
+                        # Auto-calculate tax amount if not provided
+                        if not tax.taxAmount and tax.taxPercent:
+                            tax.salesAmountWithTax = line_total
+                            tax.taxAmount = line_total * (tax.taxPercent / 100)
+                        
+                        tax.save()
+                
+                # Update receipt total and payment amount
+                receipt.total = line_total + tax_total
+                if not receipt.paymentPaymentAmount:
+                    receipt.paymentPaymentAmount = float(receipt.total)
+                receipt.save()
+                
+                messages.success(
+                    request, 
+                    f'✅ Invoice #{receipt.invoice_number} submitted successfully! '
+                    f'Total: ${receipt.total:.2f} with {line_number-1} line items.'
+                )
+                
+                # Redirect to prevent resubmission
+                return redirect('submit_invoice')
+                
+            except Exception as e:
+                messages.error(request, f'❌ Error submitting invoice: {str(e)}')
+        else:
+            # Form validation errors
+            error_messages = []
+            if not receipt_form.is_valid():
+                error_messages.append("Receipt form has errors")
+            if not line_formset.is_valid():
+                error_messages.append("Receipt lines have errors")
+            if not tax_formset.is_valid():
+                error_messages.append("Tax information has errors")
+            
+            messages.error(request, f"❌ Please correct the following: {', '.join(error_messages)}")
+    
+    else:
+        # GET request - initialize empty forms
+        buyer_form = BuyerForm()
+        receipt_form = ReceiptForm()
+        line_formset = ReceiptLineFormSet(prefix='line_formset')
+        tax_formset = ReceiptTaxFormSet(prefix='tax_formset')
+    
+    # Get recent receipts for reference
+    recent_receipts = Receipt.objects.filter(user=request.user).order_by('-created_at')[:5]
+    
+    context = {
+        'buyer_form': buyer_form,
+        'receipt_form': receipt_form,
+        'line_formset': line_formset,
+        'tax_formset': tax_formset,
+        'recent_receipts': recent_receipts,
+        'page_title': 'Submit Invoice',
+        'breadcrumb': [
+            {'title': 'Home', 'url': 'home'},
+            {'title': 'Submit Invoice', 'active': True}
+        ]
+    }
+    
+    return render(request, 'main/invoice.html', context)
 
 @login_required
 def open_fiscal_day(request):
     """Open fiscal day view"""
-    return render(request, 'main/openFiscalDay.html')
+    context = {}
+    
+    # Check if there's already an open fiscal day
+    open_fiscal_day = FiscalDay.objects.filter(
+        day_closed__isnull=True
+    ).first()
+    
+    if open_fiscal_day:
+        context['current_fiscal_day'] = open_fiscal_day
+        context['is_fiscal_day_open'] = True
+    else:
+        context['is_fiscal_day_open'] = False
+    
+    # Get recent fiscal days for display
+    context['recent_fiscal_days'] = FiscalDay.objects.all().order_by('-day_opened')[:10]
+    
+    if request.method == 'POST':
+        if not context['is_fiscal_day_open']:
+            # Open new fiscal day
+            fiscal_day = FiscalDay.objects.create(
+                day_opened=timezone.now(),
+                day_number=FiscalDay.objects.count() + 1
+            )
+            messages.success(request, f'Fiscal Day {fiscal_day.day_number} opened successfully!')
+            return redirect('open_fiscal_day')
+        else:
+            messages.error(request, 'A fiscal day is already open!')
+    
+    return render(request, 'main/openFiscalDay.html', context)
 
 @login_required
 def close_fiscal_day(request):
     """Close fiscal day view"""
-    return render(request, 'main/closeFiscalDay.html')
+    context = {}
+    
+    # Get the currently open fiscal day
+    open_fiscal_day = FiscalDay.objects.filter(
+        day_closed__isnull=True
+    ).first()
+    
+    if open_fiscal_day:
+        context['current_fiscal_day'] = open_fiscal_day
+        context['is_fiscal_day_open'] = True
+        
+        # Get receipts for this fiscal day (you can add this logic based on your needs)
+        # context['receipts_today'] = Receipt.objects.filter(fiscal_day=open_fiscal_day)
+        
+    else:
+        context['is_fiscal_day_open'] = False
+    
+    # Get recent closed fiscal days
+    context['recent_fiscal_days'] = FiscalDay.objects.filter(
+        day_closed__isnull=False
+    ).order_by('-day_closed')[:10]
+    
+    if request.method == 'POST':
+        if context['is_fiscal_day_open']:
+            # Close the fiscal day
+            open_fiscal_day.day_closed = timezone.now()
+            open_fiscal_day.save()
+            messages.success(request, f'Fiscal Day {open_fiscal_day.day_number} closed successfully!')
+            return redirect('close_fiscal_day')
+        else:
+            messages.error(request, 'No fiscal day is currently open!')
+    
+    return render(request, 'main/closeFiscalDay.html', context)
 
 @login_required
 def profile(request):
@@ -1122,3 +1663,30 @@ def logout_view(request):
     """Logout view"""
     logout(request)
     return redirect('home')
+
+# Legacy URL redirect handlers for old integer IDs
+def redirect_legacy_user_urls(request, old_user_id, url_name):
+    """
+    Redirect old integer user IDs to new UUID-based URLs
+    This provides backward compatibility for bookmarks and old links
+    """
+    try:
+        # This won't work anymore since we migrated to UUIDs, but we can handle it gracefully
+        # Instead, we'll show a friendly error or redirect to a user selection page
+        messages.error(request, 
+            f'The URL format has been updated for security. Please navigate to the page through the menu.')
+        return redirect('home')
+    except:
+        raise Http404("User not found or URL format no longer supported")
+
+def legacy_device_status_redirect(request, old_user_id):
+    """Redirect legacy device status URLs"""
+    return redirect_legacy_user_urls(request, old_user_id, 'device_status')
+
+def legacy_device_config_redirect(request, old_user_id):
+    """Redirect legacy device config URLs"""
+    return redirect_legacy_user_urls(request, old_user_id, 'device_config')
+
+def legacy_client_info_redirect(request, old_user_id):
+    """Redirect legacy client info URLs"""
+    return redirect_legacy_user_urls(request, old_user_id, 'client_info')

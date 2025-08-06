@@ -1,24 +1,54 @@
 from django.db import models
 from django.db.models import F, ExpressionWrapper
 from django.contrib.auth.models import UserManager, AbstractBaseUser, PermissionsMixin
-import datetime
 from django.utils import timezone
+from django.conf import settings
+import datetime
 import hashlib
 import json
 import os
-from django.conf import settings
-
+import uuid
 
 current_date = datetime.date.today()
 
-# Create your models here.
-class FiscalDay(models.Model):
-    day_opened = models.DateField(auto_now_add=True)
-    day_number = models.IntegerField(default=0)
-    
+class Buyer(models.Model):
+    uuid = models.UUIDField(default=uuid.uuid4, unique=True, editable=False)
+    reg_name = models.CharField(max_length=100)
+    trade_name = models.CharField(max_length=100, blank=True, null=True)
+    vat_number = models.CharField(max_length=50, blank=True, null=True)
+    bp_number = models.CharField(max_length=100, blank=True, null=True)
+    phone = models.CharField(max_length=20, blank=True, null=True)
+    contactPersonName = models.CharField(max_length=100, blank=True, null=True)
+    province = models.CharField(max_length=100, blank=True, null=True)
+    city = models.CharField(max_length=100, blank=True, null=True)
+    district = models.CharField(max_length=100, blank=True, null=True)
+    street = models.CharField(max_length=100, blank=True, null=True)
+    house_number = models.CharField(max_length=10, blank=True, null=True)
+    email = models.EmailField(blank=True, null=True)
     
     def __str__(self):
-        return str(self.day_number)
+        return self.reg_name
+
+# Create your models here.
+class FiscalDay(models.Model):
+    user = models.ForeignKey('User', on_delete=models.CASCADE, related_name='fiscal_days')
+    uuid = models.UUIDField(default=uuid.uuid4, unique=True, editable=False)
+    date_opened = models.DateTimeField(auto_now_add=True)
+    date_closed = models.DateTimeField(null=True, blank=True)
+    day_number = models.IntegerField()
+    
+    def __str__(self):
+        return f"Fiscal Day {self.day_number} for {self.user.username}"
+    
+    @property
+    def is_open(self):
+        return self.date_closed is None
+    
+    @property
+    def duration(self):
+        if self.date_closed:
+            return (self.date_closed.date() - self.date_opened.date()).days
+        return (timezone.now().date() - self.date_opened.date()).days
     
 class CustomUserManager(UserManager):
     def _create_user(self, email, password, **extra_fields):
@@ -47,12 +77,14 @@ class CustomUserManager(UserManager):
     
 class User(AbstractBaseUser, PermissionsMixin):
     email = models.EmailField(unique=True, default='', blank=True)
+    uuid = models.UUIDField(default=uuid.uuid4, editable=False, unique=True)
     first_name = models.CharField(max_length=255, blank=True, default='')
     last_name = models.CharField(max_length=255, blank=True, default='')
     phone_number = models.CharField(max_length=20, blank=True, default='')
     company_name = models.CharField(max_length=255, blank=True, default='')
     company_address  = models.CharField(max_length=255, blank=True, default='')
     company_branch = models.CharField(max_length=255, blank=True, default='')
+    tax_number = models.CharField(max_length=50, blank=True, default='')
     device_id = models.IntegerField(default=0, blank=True)
     model_name = models.CharField(max_length=255, blank=True, default='')
     model_version = models.CharField(max_length=255, blank=True, default='')
@@ -74,9 +106,7 @@ class User(AbstractBaseUser, PermissionsMixin):
     is_staff = models.BooleanField(default=False)
     is_superuser = models.BooleanField(default=False)
     date_joined = models.DateTimeField(auto_now_add=True)
-    fiscal_days = models.ForeignKey(FiscalDay,
-                             null=True,
-                             on_delete=models.SET_NULL, blank=True)
+    
     objects = CustomUserManager()
 
     USERNAME_FIELD = 'email'
@@ -130,17 +160,6 @@ class ReceiptLine(models.Model):
     def __str__(self):
         return f"{self.line_name} - Qty: {self.line_quantity} @ ${self.line_price}"
 
-class Buyer(models.Model):
-    reg_name = models.CharField(max_length=255, blank =True, null=True)
-    trade_name = models.CharField(max_length=255, blank=True, null=True)
-    tin = models.CharField(max_length=255, blank=True, null=True)
-    vat_number = models.CharField(max_length=255, blank=True, null=True)
-    contacts = models.CharField(max_length=255, blank=True, null=True)
-    address = models.CharField(max_length=255, blank=True, null=True)
-
-    def __str__(self):
-        return self.trade_name or self.reg_name or f"Buyer {self.pk}"
-
 class CreditDebitNote(models.Model):
     receipt_id = models.BigIntegerField(blank=True, null=True)
     device_id = models.IntegerField(blank=True, null=True)
@@ -171,6 +190,7 @@ MONEY_TYPE = (
 )
 
 class Receipt(models.Model):
+    uuid = models.UUIDField(default=uuid.uuid4, unique=True, editable=False)
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='receipts', null=True, blank=True)
     buyer = models.ForeignKey(Buyer, on_delete=models.CASCADE, related_name='receipts', blank=True, null=True)
     receipt_type = models.CharField(max_length=20, null=True, choices=RECEIPT_TYPE)
@@ -233,9 +253,9 @@ class Receipt(models.Model):
         # Add buyer information if available
         if self.buyer:
             hash_data.update({
-                'buyer_tin': self.buyer.tin or '',
+                'buyer_vat': self.buyer.vat_number or '',
                 'buyer_name': self.buyer.trade_name or self.buyer.reg_name or '',
-                'buyer_vat': self.buyer.vat_number or ''
+                'buyer_bp': self.buyer.bp_number or ''
             })
         
         # Create deterministic JSON string
